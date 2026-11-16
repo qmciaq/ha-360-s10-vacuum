@@ -273,7 +273,7 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Map frames are downloaded from Alibaba Cloud Object Storage Service (OSS) and rendered server-side using pure Python:
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph S1["1. Cloud Map Ingestion"]
         OSS["Alibaba Cloud OSS"] --> B64["Base64 Decode"]
         B64 --> LZ4["Pure-Python LZ4"]
@@ -283,21 +283,18 @@ flowchart LR
     subgraph S2["2. Dynamic Vector Overlays"]
         direction TB
         Pose["Robot Pose & Heading (θ)"]
-        Trail["Live Cleaning Trail"]
-        Rooms["Room Polygons & Labels"]
-        Zones["No-Go & No-Mop Zones"]
+        Trail["Live Cleaning Polyline"]
+        Rooms["Room Segmentation & Labels"]
+        Zones["Virtual Walls / No-Go"]
         DockMarker["Dock Station Glyph"]
+        Pose ~~~ Trail ~~~ Rooms ~~~ Zones ~~~ DockMarker
     end
 
     subgraph S3["3. Compositor & Output"]
-        direction TB
-        Pillow["Pillow Engine (Auto-Crop)"]
-        CameraEntity["camera.botslab_map_camera"]
-        MapCard["botslab-vacuum-map-card"]
-        Pillow --> CameraEntity --> MapCard
+        Pillow["Pillow Engine (Auto-Crop)"] --> CameraEntity["camera.botslab_map_camera"] --> MapCard["botslab-vacuum-map-card"]
     end
 
-    Grid -->|"Base Layer"| Pillow
+    Grid -->|"Base Matrix"| Pillow
     Pose --> Pillow
     Trail --> Pillow
     Rooms --> Pillow

@@ -273,7 +273,7 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Harita kareleri doğrudan Alibaba Cloud Object Storage Service (OSS) üzerinden indirilir ve saf Python kullanılarak sunucu tarafında çizilir:
 
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph S1["1. Buluttan İndirme & Açma"]
         OSS["Alibaba Cloud OSS"] --> B64["Base64 Çözücü"]
         B64 --> LZ4["Saf Python LZ4"]
@@ -287,17 +287,14 @@ flowchart LR
         Rooms["Oda Poligonları & Etiketleri"]
         Zones["Yasaklı & Mop Yapılmaz Alanlar"]
         DockMarker["Şarj İstasyonu İkonu"]
+        Pose ~~~ Trail ~~~ Rooms ~~~ Zones ~~~ DockMarker
     end
 
     subgraph S3["3. Çizim & Arayüz Çıktısı"]
-        direction TB
-        Pillow["Pillow Motoru (Auto-Crop)"]
-        CameraEntity["camera.botslab_map_camera"]
-        MapCard["botslab-vacuum-map-card"]
-        Pillow --> CameraEntity --> MapCard
+        Pillow["Pillow Motoru (Auto-Crop)"] --> CameraEntity["camera.botslab_map_camera"] --> MapCard["botslab-vacuum-map-card"]
     end
 
-    Grid -->|"Taban Katman"| Pillow
+    Grid -->|"Taban Matris"| Pillow
     Pose --> Pillow
     Trail --> Pillow
     Rooms --> Pillow

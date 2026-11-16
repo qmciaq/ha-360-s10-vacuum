@@ -8,6 +8,7 @@ import aiohttp
 from .api_base import working_status_to_state
 from .api_botslab import BotslabModernClient
 from .api_legacy_360 import BotslabLegacy360Client
+from .exceptions import BotslabAuthError
 from .map_util import (
     decompress_lz4_block,
     render_map_advanced,
@@ -85,6 +86,39 @@ class BotslabVacuumApi(BotslabModernClient):
             self._legacy_client.push_key = value
 
     @property
+    def q(self) -> str | None:
+        """Return Q token."""
+        return self._q
+
+    @q.setter
+    def q(self, value: str | None) -> None:
+        self._q = value
+        if hasattr(self, "_legacy_client"):
+            self._legacy_client.q = value
+
+    @property
+    def t(self) -> str | None:
+        """Return T token."""
+        return self._t
+
+    @t.setter
+    def t(self, value: str | None) -> None:
+        self._t = value
+        if hasattr(self, "_legacy_client"):
+            self._legacy_client.t = value
+
+    @property
+    def session_refresher(self) -> Any | None:
+        """Return session refresher callback."""
+        return self._session_refresher
+
+    @session_refresher.setter
+    def session_refresher(self, value: Any | None) -> None:
+        self._session_refresher = value
+        if hasattr(self, "_legacy_client"):
+            self._legacy_client.session_refresher = value
+
+    @property
     def push_alias(self) -> str:
         """Return push alias."""
         return self._push_alias
@@ -116,8 +150,19 @@ class BotslabVacuumApi(BotslabModernClient):
     async def send_legacy_360_cmd(
         self, sn: str, info_type: str, data: Any = ""
     ) -> dict[str, Any]:
-        """Send command to legacy Qihoo 360 vacuum cloud."""
-        return await self._legacy_client.send_legacy_360_cmd(sn, info_type, data)
+        """Send command to legacy Qihoo 360 vacuum cloud with auth retry."""
+        try:
+            return await self._legacy_client.send_legacy_360_cmd(sn, info_type, data)
+        except BotslabAuthError as err:
+            if self.session_refresher is not None:
+                _LOGGER.info(
+                    "Legacy 360 command %s hit auth error (%s), refreshing session...",
+                    info_type,
+                    err,
+                )
+                await self.session_refresher(force_refresh=True)
+                return await self._legacy_client.send_legacy_360_cmd(sn, info_type, data)
+            raise
 
     async def get_latest_clean_record(self, sn: str) -> dict[str, Any] | None:
         """Fetch latest clean record from legacy Qihoo 360 cloud."""

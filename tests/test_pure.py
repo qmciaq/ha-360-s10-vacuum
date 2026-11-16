@@ -3260,6 +3260,26 @@ async def test_coordinator_update_data_recovers_from_auth_error():
     assert coord.api.get_property_extended.call_count == 2
 
 
+@pytest.mark.asyncio
+async def test_legacy_360_send_cmd_recovers_from_auth_error():
+    """Verify send_legacy_360_cmd re-authenticates and retries if legacy cloud raises BotslabAuthError."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.botslab_vacuum.api import BotslabVacuumApi
+    from custom_components.botslab_vacuum.exceptions import BotslabAuthError
+
+    api = BotslabVacuumApi(MagicMock(), region="cn", m2="test_m2", q="old_q", t="old_t")
+    api._legacy_client.send_legacy_360_cmd = AsyncMock(
+        side_effect=[BotslabAuthError("Legacy 360 session expired"), {"errno": 0, "msg": "ok"}]
+    )
+    refresher_mock = AsyncMock()
+    api.session_refresher = refresher_mock
+
+    res = await api.send_legacy_360_cmd("SN_LEGACY", "30000", {"cmd": "start"})
+    assert res["errno"] == 0
+    refresher_mock.assert_called_once_with(force_refresh=True)
+    assert api._legacy_client.send_legacy_360_cmd.call_count == 2
+
+
 
 
 

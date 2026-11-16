@@ -3209,7 +3209,6 @@ async def test_coordinator_update_data_recovers_from_auth_error():
     from unittest.mock import AsyncMock, MagicMock
     from custom_components.botslab_vacuum.coordinator import BotslabVacuumCoordinator
     from custom_components.botslab_vacuum.exceptions import BotslabAuthError
-    from custom_components.botslab_vacuum.models import BotslabVacuumDevice
 
     coord = MagicMock(spec=BotslabVacuumCoordinator)
     coord.hass = MagicMock()

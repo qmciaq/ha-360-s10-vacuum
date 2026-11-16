@@ -197,33 +197,39 @@ For in-depth protocol analysis, payload schemas, and system design, refer to the
 The integration communicates with Botslab devices via a proprietary **Cloud-Shadow Device Architecture**. The robot vacuum never accepts incoming local socket connections on your home network; it maintains an outbound Alink (Alibaba Cloud IoT) MQTT downlink tunnel to the regional cloud broker.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant HA as Home Assistant (Integration)
-    participant QUC as 360 QUC Auth Server
-    participant Cloud as Botslab Cloud (*-sapp-api)
-    participant OSS as Alibaba Cloud OSS
-    participant Robot as Physical Robot Vacuum
+flowchart TD
+    subgraph HA["Home Assistant (Local Network)"]
+        Integration["Botslab Vacuum Integration"]
+        Lovelace["Dashboard & Cards"]
+        Camera["camera.botslab_map_camera"]
+        Integration --> Camera
+        Camera --> Lovelace
+        Lovelace --> Integration
+    end
 
-    Note over HA,QUC: 1. Headless Session Bootstrapping
-    HA->>QUC: UserIntf.login (DES-CBC parad + RSA-1024 + MD5 sig)
-    QUC-->>HA: Qihoo Cookies (Q & T tokens)
-    HA->>Cloud: POST /v1/app/login (Q, T, m2)
-    Cloud-->>HA: Active Session (sid) & push_alias
+    subgraph Cloud["Botslab & Qihoo 360 Cloud Services"]
+        Auth["1. QUC Authentication Server"]
+        API["2. Botslab IoT API"]
+        OSS["3. Alibaba Cloud OSS"]
+        QPush["4. QPUSH Gateway"]
+    end
 
-    Note over HA,Cloud: 2. Cloud-Shadow Telemetry & Commands
-    HA->>Cloud: GET /v1/device/properties (signed query + JWS header)
-    Cloud-->>HA: Device Shadow Telemetry (JSON)
-    HA->>Cloud: POST /v1/device/service/invoke (signed query + JWS header)
-    Cloud->>Robot: Alink Downlink (Start / Pause / Clean Room)
-    Robot-->>Cloud: Execution Acknowledgment
+    subgraph RobotTier["Physical Vacuum & Base Station"]
+        Vacuum["Robot Vacuum (Alink MQTT)"]
+        Dock["Charging Station / Dock"]
+        Vacuum --- Dock
+    end
 
-    Note over Robot,HA: 3. Map Streaming & Pure-Python Pipeline
-    Robot->>OSS: Upload Map Package (LZ4 compressed)
-    HA->>Cloud: Request Map Package OSS URL
-    Cloud-->>HA: Pre-signed OSS Download URL
-    HA->>OSS: Download Map Payload
-    Note over HA: Pure-Python LZ4 Decompression + Pillow Camera Rendering
+    Integration -->|"1. Headless Login (DES/RSA/MD5)"| Auth
+    Auth -.->|"Returns Q & T Tokens"| Integration
+
+    Integration -->|"2. Signed Requests & JWS Header"| API
+    API -->|"Alink MQTT Downlink"| Vacuum
+
+    Vacuum -->|"Uploads Map Package (LZ4)"| OSS
+    OSS -->|"Downloads Map Payload"| Integration
+
+    QPush -.->|"TCP Push Event Alerts"| Integration
 ```
 
 ### 1. Cloud-Shadow Device Architecture
@@ -272,21 +278,35 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Map frames are downloaded from Alibaba Cloud Object Storage Service (OSS) and rendered server-side using pure Python:
 
 ```mermaid
-flowchart LR
-    A["Alibaba Cloud OSS<br>(*.oss-*.aliyuncs.com)"] -->|"Download Payload"| B["Base64 Decoder"]
-    B --> C["Pure-Python LZ4<br>Block Decompressor"]
-    C --> D["2D Occupancy Grid<br>(Obstacles / Free space)"]
-    D --> E["Pillow Engine<br>+ Dynamic Overlays"]
-    E --> F["Live Camera Entity<br>(camera.botslab_map_camera)"]
-
-    subgraph Dynamic Overlays
-        G["Dock Station Glyphs"]
-        H["Live Robot Pose & Heading"]
-        I["Cleaning Trail Polyline"]
-        J["Room Polygons & Centroids"]
-        K["No-Go & No-Mop Zones"]
+flowchart TD
+    subgraph S1["1. Cloud Map Ingestion"]
+        OSS["Alibaba Cloud OSS"] -->|"Download"| B64["Base64 Decoder"]
+        B64 --> LZ4["Pure-Python LZ4 Decompressor"]
+        LZ4 --> Grid["2D Occupancy Grid"]
     end
-    Dynamic Overlays --> E
+
+    subgraph S2["2. Dynamic Vector Overlays"]
+        direction TB
+        Dock["Dock Station Glyph"]
+        Pose["Robot Pose & Heading"]
+        Trail["Live Cleaning Trail"]
+        Rooms["Room Polygons & Labels"]
+        NoGo["No-Go & No-Mop Boxes"]
+    end
+
+    subgraph S3["3. Rendering & Output"]
+        Pillow["Pillow Engine (Auto-Crop)"]
+        Camera["camera.botslab_map_camera"]
+        Card["botslab-vacuum-map-card"]
+        Pillow --> Camera --> Card
+    end
+
+    Grid --> Pillow
+    Dock --> Pillow
+    Pose --> Pillow
+    Trail --> Pillow
+    Rooms --> Pillow
+    NoGo --> Pillow
 ```
 
 1. **OSS Download:** Pre-signed URLs are fetched from the cloud shadow (`MapPkgOssInfo`).

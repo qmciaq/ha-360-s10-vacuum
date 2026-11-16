@@ -197,33 +197,39 @@ Derinlemesine protokol analizi, payload şemaları ve mimari detaylar için `doc
 Entegrasyon, Botslab cihazlarına tescilli bir **Bulut-Gölge (Cloud-Shadow) Cihaz Mimarisi** üzerinden bağlanır. Robot süpürge yerel ağınızda gelen bağlantıları dinlemez; buluta doğru Alink (Alibaba Cloud IoT) MQTT downlink tünelini sürekli açık tutar.
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    participant HA as Home Assistant (Entegrasyon)
-    participant QUC as 360 QUC Kimlik Doğrulama
-    participant Cloud as Botslab Bulutu (*-sapp-api)
-    participant OSS as Alibaba Cloud OSS
-    participant Robot as Fiziksel Robot Süpürge
+flowchart TD
+    subgraph HA["Home Assistant (Yerel Ağ)"]
+        Integration["Botslab Entegrasyonu"]
+        Lovelace["Arayüz & Kartlar"]
+        Camera["camera.botslab_map_camera"]
+        Integration --> Camera
+        Camera --> Lovelace
+        Lovelace --> Integration
+    end
 
-    Note over HA,QUC: 1. Otomatik (Headless) Oturum Başlatma
-    HA->>QUC: UserIntf.login (DES-CBC parad + RSA-1024 + MD5 imza)
-    QUC-->>HA: Qihoo Çerezleri (Q ve T belirteçleri)
-    HA->>Cloud: POST /v1/app/login (Q, T, m2)
-    Cloud-->>HA: Aktif Oturum (sid) ve push_alias
+    subgraph Bulut["Botslab & Qihoo 360 Bulut Servisleri"]
+        Auth["1. QUC Kimlik Doğrulama Sunucusu"]
+        API["2. Botslab IoT API"]
+        OSS["3. Alibaba Cloud OSS"]
+        QPush["4. QPUSH Ağ Geçidi"]
+    end
 
-    Note over HA,Cloud: 2. Bulut-Gölge Telemetri & Komutlar
-    HA->>Cloud: GET /v1/device/properties (imzalı sorgu + JWS başlığı)
-    Cloud-->>HA: Cihaz Gölge Telemetrisi (JSON)
-    HA->>Cloud: POST /v1/device/service/invoke (imzalı sorgu + JWS başlığı)
-    Cloud->>Robot: Alink Downlink (Başlat / Duraklat / Oda Temizliği)
-    Robot-->>Cloud: Komut Yürütme Onayı
+    subgraph Donanim["Fiziksel Süpürge & İstasyon"]
+        Vacuum["Robot Süpürge (Alink MQTT)"]
+        Dock["Şarj İstasyonu (Dock)"]
+        Vacuum --- Dock
+    end
 
-    Note over Robot,HA: 3. Harita Akışı ve Saf Python İşleme
-    Robot->>OSS: Harita Paketi Yükleme (LZ4 sıkıştırmalı)
-    HA->>Cloud: Harita Paketi OSS URL Talebi
-    Cloud-->>HA: Ön İmzalı OSS İndirme Bağlantısı
-    HA->>OSS: Harita Yükünü İndir
-    Note over HA: Saf Python LZ4 Açma + Pillow Kamera Çizimi
+    Integration -->|"1. Otomatik Giriş (DES/RSA/MD5)"| Auth
+    Auth -.->|"Q ve T Belirteçleri"| Integration
+
+    Integration -->|"2. İmzalı İstekler & JWS Başlığı"| API
+    API -->|"Alink MQTT Downlink"| Vacuum
+
+    Vacuum -->|"Harita Paketi Yükler (LZ4)"| OSS
+    OSS -->|"Harita Paketini İndirir"| Integration
+
+    QPush -.->|"TCP Durum Bildirimleri"| Integration
 ```
 
 ### 1. Bulut-Gölge (Cloud-Shadow) Cihaz Mimarisi
@@ -272,21 +278,35 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Harita kareleri doğrudan Alibaba Cloud Object Storage Service (OSS) üzerinden indirilir ve saf Python kullanılarak sunucu tarafında çizilir:
 
 ```mermaid
-flowchart LR
-    A["Alibaba Cloud OSS<br>(*.oss-*.aliyuncs.com)"] -->|"Paketi İndir"| B["Base64 Çözücü"]
-    B --> C["Saf Python LZ4<br>Blok Açıcı"]
-    C --> D["2D Doluluk Izgarası<br>(Engeller / Açık alan)"]
-    D --> E["Pillow Motoru<br>+ Dinamik Katmanlar"]
-    E --> F["Canlı Kamera Varlığı<br>(camera.botslab_map_camera)"]
-
-    subgraph Dinamik Katmanlar
-        G["Şarj İstasyonu İkonu"]
-        H["Canlı Robot Konumu & Yönü"]
-        I["Temizlik Rotası Çizgisi"]
-        J["Oda Poligonları & Merkezleri"]
-        K["Yasaklı Alanlar & Duvarlar"]
+flowchart TD
+    subgraph S1["1. Buluttan İndirme ve Açma"]
+        OSS["Alibaba Cloud OSS"] -->|"İndir"| B64["Base64 Çözücü"]
+        B64 --> LZ4["Saf Python LZ4 Açıcı"]
+        LZ4 --> Grid["2D Doluluk Izgarası"]
     end
-    Dinamik Katmanlar --> E
+
+    subgraph S2["2. Dinamik Vektör Katmanları"]
+        direction TB
+        Dock["Şarj İstasyonu İkonu"]
+        Pose["Robot Konumu & Yönü"]
+        Trail["Canlı Temizlik Rotası"]
+        Rooms["Oda Poligonları & Etiketleri"]
+        NoGo["Yasaklı & Mop Yapılmaz Alanlar"]
+    end
+
+    subgraph S3["3. Çizim & Kullanıcı Arayüzü"]
+        Pillow["Pillow Motoru (Auto-Crop)"]
+        Camera["camera.botslab_map_camera"]
+        Card["botslab-vacuum-map-card"]
+        Pillow --> Camera --> Card
+    end
+
+    Grid --> Pillow
+    Dock --> Pillow
+    Pose --> Pillow
+    Trail --> Pillow
+    Rooms --> Pillow
+    NoGo --> Pillow
 ```
 
 1. **OSS İndirme:** En güncel harita paketi için bulut gölgesinden ön imzalı indirme bağlantısı alınır (`MapPkgOssInfo`).

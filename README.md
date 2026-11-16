@@ -200,36 +200,31 @@ The integration communicates with Botslab devices via a proprietary **Cloud-Shad
 flowchart TD
     subgraph HA["Home Assistant (Local Network)"]
         Integration["Botslab Vacuum Integration"]
-        Lovelace["Dashboard & Cards"]
         Camera["camera.botslab_map_camera"]
-        Integration --> Camera
-        Camera --> Lovelace
-        Lovelace --> Integration
+        Cards["Lovelace Map & Routine Cards"]
+        Integration --> Camera --> Cards
     end
 
     subgraph Cloud["Botslab & Qihoo 360 Cloud Services"]
-        Auth["1. QUC Authentication Server"]
-        API["2. Botslab IoT API"]
-        OSS["3. Alibaba Cloud OSS"]
-        QPush["4. QPUSH Gateway"]
+        Auth["1. QUC Auth Server (DES/RSA/MD5)"]
+        API["2. Botslab IoT API (REST/JWS)"]
+        OSS["3. Alibaba Cloud OSS (Map Storage)"]
+        QPush["4. QPUSH Gateway (TCP Daemon)"]
+        Auth -->|"Session Tokens"| API
     end
 
     subgraph RobotTier["Physical Vacuum & Base Station"]
-        Vacuum["Robot Vacuum (Alink MQTT)"]
+        Vacuum["Robot Vacuum (Firmware)"]
         Dock["Charging Station / Dock"]
         Vacuum --- Dock
     end
 
-    Integration -->|"1. Headless Login (DES/RSA/MD5)"| Auth
-    Auth -.->|"Returns Q & T Tokens"| Integration
-
-    Integration -->|"2. Signed Requests & JWS Header"| API
+    Integration -->|"1. Headless Login"| Auth
+    Integration <-->|"2. Device Controls & Shadow"| API
     API -->|"Alink MQTT Downlink"| Vacuum
-
-    Vacuum -->|"Uploads Map Package (LZ4)"| OSS
-    OSS -->|"Downloads Map Payload"| Integration
-
-    QPush -.->|"TCP Push Event Alerts"| Integration
+    Vacuum -->|"Uploads LZ4 Map"| OSS
+    OSS -->|"3. Map Download"| Integration
+    QPush -.->|"4. TCP Live Events"| Integration
 ```
 
 ### 1. Cloud-Shadow Device Architecture
@@ -278,35 +273,36 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Map frames are downloaded from Alibaba Cloud Object Storage Service (OSS) and rendered server-side using pure Python:
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph S1["1. Cloud Map Ingestion"]
-        OSS["Alibaba Cloud OSS"] -->|"Download"| B64["Base64 Decoder"]
-        B64 --> LZ4["Pure-Python LZ4 Decompressor"]
+        OSS["Alibaba Cloud OSS"] --> B64["Base64 Decode"]
+        B64 --> LZ4["Pure-Python LZ4"]
         LZ4 --> Grid["2D Occupancy Grid"]
     end
 
     subgraph S2["2. Dynamic Vector Overlays"]
         direction TB
-        Dock["Dock Station Glyph"]
-        Pose["Robot Pose & Heading"]
+        Pose["Robot Pose & Heading (θ)"]
         Trail["Live Cleaning Trail"]
         Rooms["Room Polygons & Labels"]
-        NoGo["No-Go & No-Mop Boxes"]
+        Zones["No-Go & No-Mop Zones"]
+        DockMarker["Dock Station Glyph"]
     end
 
-    subgraph S3["3. Rendering & Output"]
+    subgraph S3["3. Compositor & Output"]
+        direction TB
         Pillow["Pillow Engine (Auto-Crop)"]
-        Camera["camera.botslab_map_camera"]
-        Card["botslab-vacuum-map-card"]
-        Pillow --> Camera --> Card
+        CameraEntity["camera.botslab_map_camera"]
+        MapCard["botslab-vacuum-map-card"]
+        Pillow --> CameraEntity --> MapCard
     end
 
-    Grid --> Pillow
-    Dock --> Pillow
+    Grid -->|"Base Layer"| Pillow
     Pose --> Pillow
     Trail --> Pillow
     Rooms --> Pillow
-    NoGo --> Pillow
+    Zones --> Pillow
+    DockMarker --> Pillow
 ```
 
 1. **OSS Download:** Pre-signed URLs are fetched from the cloud shadow (`MapPkgOssInfo`).

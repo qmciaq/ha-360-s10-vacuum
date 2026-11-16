@@ -200,36 +200,31 @@ Entegrasyon, Botslab cihazlarına tescilli bir **Bulut-Gölge (Cloud-Shadow) Cih
 flowchart TD
     subgraph HA["Home Assistant (Yerel Ağ)"]
         Integration["Botslab Entegrasyonu"]
-        Lovelace["Arayüz & Kartlar"]
         Camera["camera.botslab_map_camera"]
-        Integration --> Camera
-        Camera --> Lovelace
-        Lovelace --> Integration
+        Cards["Lovelace Harita & Rutin Kartları"]
+        Integration --> Camera --> Cards
     end
 
     subgraph Bulut["Botslab & Qihoo 360 Bulut Servisleri"]
-        Auth["1. QUC Kimlik Doğrulama Sunucusu"]
-        API["2. Botslab IoT API"]
-        OSS["3. Alibaba Cloud OSS"]
-        QPush["4. QPUSH Ağ Geçidi"]
+        Auth["1. QUC Giriş Sunucusu (DES/RSA/MD5)"]
+        API["2. Botslab IoT API (REST/JWS)"]
+        OSS["3. Alibaba Cloud OSS (Harita Deposu)"]
+        QPush["4. QPUSH Ağ Geçidi (TCP Daemon)"]
+        Auth -->|"Oturum Belirteçleri"| API
     end
 
     subgraph Donanim["Fiziksel Süpürge & İstasyon"]
-        Vacuum["Robot Süpürge (Alink MQTT)"]
+        Vacuum["Robot Süpürge (Firmware)"]
         Dock["Şarj İstasyonu (Dock)"]
         Vacuum --- Dock
     end
 
-    Integration -->|"1. Otomatik Giriş (DES/RSA/MD5)"| Auth
-    Auth -.->|"Q ve T Belirteçleri"| Integration
-
-    Integration -->|"2. İmzalı İstekler & JWS Başlığı"| API
+    Integration -->|"1. Otomatik Giriş"| Auth
+    Integration <-->|"2. Cihaz Kontrolü & Gölge"| API
     API -->|"Alink MQTT Downlink"| Vacuum
-
-    Vacuum -->|"Harita Paketi Yükler (LZ4)"| OSS
-    OSS -->|"Harita Paketini İndirir"| Integration
-
-    QPush -.->|"TCP Durum Bildirimleri"| Integration
+    Vacuum -->|"Harita Yükler (LZ4)"| OSS
+    OSS -->|"3. Harita İndirme"| Integration
+    QPush -.->|"4. TCP Canlı Bildirimler"| Integration
 ```
 
 ### 1. Bulut-Gölge (Cloud-Shadow) Cihaz Mimarisi
@@ -278,35 +273,36 @@ Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 Harita kareleri doğrudan Alibaba Cloud Object Storage Service (OSS) üzerinden indirilir ve saf Python kullanılarak sunucu tarafında çizilir:
 
 ```mermaid
-flowchart TD
-    subgraph S1["1. Buluttan İndirme ve Açma"]
-        OSS["Alibaba Cloud OSS"] -->|"İndir"| B64["Base64 Çözücü"]
-        B64 --> LZ4["Saf Python LZ4 Açıcı"]
+flowchart LR
+    subgraph S1["1. Buluttan İndirme & Açma"]
+        OSS["Alibaba Cloud OSS"] --> B64["Base64 Çözücü"]
+        B64 --> LZ4["Saf Python LZ4"]
         LZ4 --> Grid["2D Doluluk Izgarası"]
     end
 
     subgraph S2["2. Dinamik Vektör Katmanları"]
         direction TB
-        Dock["Şarj İstasyonu İkonu"]
-        Pose["Robot Konumu & Yönü"]
+        Pose["Robot Konumu & Yönü (θ)"]
         Trail["Canlı Temizlik Rotası"]
         Rooms["Oda Poligonları & Etiketleri"]
-        NoGo["Yasaklı & Mop Yapılmaz Alanlar"]
+        Zones["Yasaklı & Mop Yapılmaz Alanlar"]
+        DockMarker["Şarj İstasyonu İkonu"]
     end
 
-    subgraph S3["3. Çizim & Kullanıcı Arayüzü"]
+    subgraph S3["3. Çizim & Arayüz Çıktısı"]
+        direction TB
         Pillow["Pillow Motoru (Auto-Crop)"]
-        Camera["camera.botslab_map_camera"]
-        Card["botslab-vacuum-map-card"]
-        Pillow --> Camera --> Card
+        CameraEntity["camera.botslab_map_camera"]
+        MapCard["botslab-vacuum-map-card"]
+        Pillow --> CameraEntity --> MapCard
     end
 
-    Grid --> Pillow
-    Dock --> Pillow
+    Grid -->|"Taban Katman"| Pillow
     Pose --> Pillow
     Trail --> Pillow
     Rooms --> Pillow
-    NoGo --> Pillow
+    Zones --> Pillow
+    DockMarker --> Pillow
 ```
 
 1. **OSS İndirme:** En güncel harita paketi için bulut gölgesinden ön imzalı indirme bağlantısı alınır (`MapPkgOssInfo`).

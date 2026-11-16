@@ -36,7 +36,9 @@ Production-ready Home Assistant integration for **Botslab** and **Qihoo 360** ro
 
 ## 🌟 Key Features
 
-- 🔐 **Headless Auto-Login:** No ADB, no root, no network sniffing or proxy setups required. Simply provide your Botslab mobile app email and password.
+- 🔐 **Headless Auto-Login & Self-Healing:** No ADB, no root, no network sniffing or proxy setups required. Simply provide your Botslab mobile app email and password.
+- 🔄 **Autonomous Session Self-Healing:** Automatically detects and recovers from session evictions (`102003` *"logged in on another device"*, `1015`) caused by opening the official mobile app. Re-authenticates headlessly in the background and transparently retries commands without manual re-login.
+- 📐 **Cryptographic Cloud-Shadow Architecture:** Full headless QUC session bootstrapping (DES-CBC `parad` + RSA-1024 `key` + MD5 `sig`), dynamic query signing (`md5(appkey + m2 + sign_ts + sign_no + secret)`), and Base64 JWS authorization header management.
 - 🧹 **Comprehensive Vacuum Controls:**
   - Start / Clean, Pause, Stop, Return to Base (Dock)
   - Fan Speed selection (`Quiet`, `Standard`, `Medium`, `Max`)
@@ -46,9 +48,10 @@ Production-ready Home Assistant integration for **Botslab** and **Qihoo 360** ro
 - 🚪 **Dynamic Room Cleaning & No-Go Zones:**
   - Automatically identifies partitioned rooms from your map
   - Exposes room cleaning actions/services directly in Home Assistant
-  - **No-Go Zones (`SetFbdPlaces`):** Set virtual forbidden cleaning zones and boundaries directly via service call
-- 🗺️ **High-Resolution Map Rendering & Built-in Cards:**
-  - Dynamic Pillow auto-crop eliminating black void borders
+  - **No-Go & No-Mop Zones (`SetZones` / `SetFbdPlaces`):** Interactively add, delete, and persist virtual forbidden cleaning boxes, no-mop zones, and virtual walls directly via Home Assistant services and UI cards
+- 🗺️ **Pure-Python Map Pipeline & Built-in Cards:**
+  - Direct download from Alibaba Cloud OSS, Base64 decoding, and zero-dependency LZ4 occupancy grid decompression
+  - Dynamic Pillow server-side rendering eliminating black void borders (auto-crop)
   - Dock station glyph, live cleaning path polyline, and robot heading orientation arrow
   - Zero-config bundled Lovelace cards:
     - **`botslab-vacuum-map-card`**: Modern, native interactive card with visual UI editor, sequential room ordering (1 -> 2), customized per-room suction and water flow settings, free zone cleaning, and spot cleaning (adapted from *noambergauz/dreame-vacuum-map-card*).
@@ -189,58 +192,144 @@ For in-depth protocol analysis, payload schemas, and system design, refer to the
 
 ---
 
-## 🔬 Technical Architecture
+## 🔬 Technical Architecture & Protocol Internals
 
-The vacuum cloud communication runs over a 3-tier proprietary architecture:
+The integration communicates with Botslab devices via a proprietary **Cloud-Shadow Device Architecture**. The robot vacuum never accepts incoming local socket connections on your home network; it maintains an outbound Alink (Alibaba Cloud IoT) MQTT downlink tunnel to the regional cloud broker.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant HA as Home Assistant (Integration)
+    participant QUC as 360 QUC Auth Server
+    participant Cloud as Botslab Cloud (*-sapp-api)
+    participant OSS as Alibaba Cloud OSS
+    participant Robot as Physical Robot Vacuum
+
+    Note over HA,QUC: 1. Headless Session Bootstrapping
+    HA->>QUC: UserIntf.login (DES-CBC parad + RSA-1024 + MD5 sig)
+    QUC-->>HA: Qihoo Cookies (Q & T tokens)
+    HA->>Cloud: POST /v1/app/login (Q, T, m2)
+    Cloud-->>HA: Active Session (sid) & push_alias
+
+    Note over HA,Cloud: 2. Cloud-Shadow Telemetry & Commands
+    HA->>Cloud: GET /v1/device/properties (signed query + JWS header)
+    Cloud-->>HA: Device Shadow Telemetry (JSON)
+    HA->>Cloud: POST /v1/device/service/invoke (signed query + JWS header)
+    Cloud->>Robot: Alink Downlink (Start / Pause / Clean Room)
+    Robot-->>Cloud: Execution Acknowledgment
+
+    Note over Robot,HA: 3. Map Streaming & Pure-Python Pipeline
+    Robot->>OSS: Upload Map Package (LZ4 compressed)
+    HA->>Cloud: Request Map Package OSS URL
+    Cloud-->>HA: Pre-signed OSS Download URL
+    HA->>OSS: Download Map Payload
+    Note over HA: Pure-Python LZ4 Decompression + Pillow Camera Rendering
 ```
-[ Integration / Home Assistant ]
-               │
-               ▼ (1. HTTPS QUC Auth & invoke_service)
-     [ Botslab Cloud Backend (eu1-sapp-api.botslab.com) ]
-               │                                   │
-               ▼ (2. Alink Downlink)               ▼ (3. QPUSH Gateway)
-        [ Robot Vacuum ]                    [ Home Assistant Listener ]
-  (Aliyun MQTT, Frankfurt broker)        (Dynamic GSLB dp.push.dc.360.cn -> Port 443/80)
+
+### 1. Cloud-Shadow Device Architecture
+* **Zero Incoming Local Ports:** The vacuum does not expose a local HTTP/REST server or local WebSocket port. All interactions pass through the regional Botslab IoT cloud backend (`*-sapp-api.botslab.com`).
+* **Bidirectional Shadow Synchronization:**
+  - **Uplink:** The robot streams property states (battery level, working status, consumable wear, current coordinates) to its device shadow.
+  - **Downlink:** Home Assistant dispatches action requests via `POST /v1/device/service/invoke`, which the cloud pushes through Alink MQTT directly to the robot's active socket.
+
+### 2. Headless Authentication Bootstrapping
+Authentication is negotiated headlessly without ADB, rooting, or proxy tools:
+
+| Stage | Endpoint | Cryptographic Primitive | Result |
+|---|---|---|---|
+| **1. 360 QUC Login** | `POST https://passport.360.cn/request.php` (or regional login host) | • Form parameters encrypted with **DES-CBC** (`parad`)<br>• Symmetric key material encrypted with **RSA-1024** (`key`)<br>• Request signature generated with **MD5** (`sig`) | Account session cookies: **`Q`** and **`T`** |
+| **2. Botslab App Login** | `POST https://*-sapp-api.botslab.com/v1/app/login` | • Exchanges `Q` and `T` tokens with hardware-bound `m2` identifier | API session token: **`sid`** & **`push_alias`** |
+
+### 3. Request Signing & Authorization Header
+Every HTTPS request dispatched to `*-sapp-api.botslab.com` requires two layers of cryptographic authentication:
+
+#### A. Cryptographic Query Signature
+URL query parameters must include a tamper-resistant MD5 signature:
+```text
+sign = MD5(appkey + m2 + sign_ts + sign_no + secret)
+```
+* **`appkey`**: Regional client application key embedded in the mobile client.
+* **`m2`**: Unique client installation identifier generated during initial config flow.
+* **`sign_ts`**: Unix epoch timestamp in milliseconds (`time.time() * 1000`).
+* **`sign_no`**: Cryptographic nonce (16-char random hex string).
+* **`secret`**: Secret signing key corresponding to the client `appkey`.
+
+#### B. JWS Authorization Header
+All device endpoints require an `Authorization` header carrying a Base64-encoded JSON Web Signature (JWS) payload:
+```http
+Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 ```
 
-### 1. What is Qihoo QPUSH?
-* **Protocol:** A proprietary binary TCP push protocol developed by Qihoo and Botslab for client push notifications. The integration dynamically resolves regional push gateway IPs via `dp.push.dc.360.cn?appId=gqrwex6nq54m` and connects via raw binary TCP on Port 443 (primary, no TLS) or Port 80 (fallback), with Frankfurt (`8.211.52.133`) as a safe fallback.
-* **Function:** QPUSH is **not** used to send commands to the robot. Instead, when the vacuum begins cleaning, uploads a map file, or throws an error, the cloud pushes an `OP_PUSH` frame to the client so UI state updates in real-time.
-* **Two-Stage Dynamic Polling:** The integration polls every **5 seconds** during active cleaning (`STATUS_CLEANING`) and switches to **5 minutes (300s)** when docked or idle to conserve robot CPU and Wi-Fi airtime. Any push frame or state change wakes the coordinator immediately.
+### 4. Autonomous Session Self-Healing (Multi-Device Recovery)
+> [!IMPORTANT]
+> **Single-Session Policy:** Botslab cloud enforces strict single-session concurrency per user account. Opening the official Botslab mobile app evicts Home Assistant's session, returning error code `102003` (*"logged in on another device"*) or `1015` (*"invalid/missing session"*).
 
-### 2. Alibaba Cloud (Aliyun) Alink & Downlink Commands
-* Botslab S8 hardware runs on the **Alibaba Cloud IoT (Alink)** platform.
-* When the vacuum is in standby/sleep mode, it keeps an active Alink MQTT connection to Alibaba's Frankfurt broker.
-* When we issue a start, pause, or room clean command, the Botslab Cloud forwards it using enterprise Alibaba Cloud permissions through Alink downlink to the robot's active socket, instantly waking it.
+* **Detection & Interception:** The client intercepts all authentication expiration codes (`100003`, `102008`, `102003`, `1015`, `1002`, `1003`, `401`).
+* **Transparent Self-Healing:** The coordinator triggers an immediate background re-login using the stored credentials, obtains fresh `Q`, `T`, and `sid` tokens, updates the configuration entry, and transparently retries the pending API call.
+* **Zero User Disruption:** The user is never logged out, and vacuum controls remain 100% operational even if family members frequently open the mobile app.
 
-### 3. Why DeviceSecret is Neither Available Nor Required
-* In Alibaba Cloud IoT, connecting directly to the broker as a device requires a `DeviceSecret`.
-* This secret is flashed into the robot's **hardware secure storage/EEPROM** during factory manufacturing and is never transmitted to the mobile app or cloud account.
-* Furthermore, Alibaba Cloud IoT enforces a **single active MQTT session per device name**. Any attempt to connect directly as the device would forcibly disconnect (*kick offline*) the physical robot in your home.
-* Therefore, this integration communicates via the official `invoke_service` API tunnel - exactly as the official mobile app does.
+### 5. Alibaba Cloud OSS Map Pipeline & Server-Side Rendering
+Map frames are downloaded from Alibaba Cloud Object Storage Service (OSS) and rendered server-side using pure Python:
 
-### 4. Endpoints the official app contacts
+```mermaid
+flowchart LR
+    A["Alibaba Cloud OSS<br>(*.oss-*.aliyuncs.com)"] -->|"Download Payload"| B["Base64 Decoder"]
+    B --> C["Pure-Python LZ4<br>Block Decompressor"]
+    C --> D["2D Occupancy Grid<br>(Obstacles / Free space)"]
+    D --> E["Pillow Engine<br>+ Dynamic Overlays"]
+    E --> F["Live Camera Entity<br>(camera.botslab_map_camera)"]
 
-A traffic capture of the official app shows **no private or local addresses at all**. The robot never accepts incoming connections on your network; it dials out to the cloud. Every host the integration relies on:
+    subgraph Dynamic Overlays
+        G["Dock Station Glyphs"]
+        H["Live Robot Pose & Heading"]
+        I["Cleaning Trail Polyline"]
+        J["Room Polygons & Centroids"]
+        K["No-Go & No-Mop Zones"]
+    end
+    Dynamic Overlays --> E
+```
 
-| Host | Purpose | Used? |
+1. **OSS Download:** Pre-signed URLs are fetched from the cloud shadow (`MapPkgOssInfo`).
+2. **Pure-Python LZ4 Decompression:** Map packages contain a Base64-encoded LZ4-compressed 2D occupancy grid. An embedded, zero-dependency LZ4 block decompressor processes the byte stream directly into memory.
+3. **Pillow Vector Overlay Pipeline:**
+   - **Auto-Crop:** Calculates non-empty bounding boxes, stripping away vast black margins.
+   - **Room Segmentation:** Paints color-coded room polygons and computes centroid label coordinates.
+   - **Hardware Overlays:** Renders the charging dock glyph, virtual forbidden walls, and no-mop boxes.
+   - **Real-Time Telemetry:** Overlays the live cleaning path polyline and the robot's heading orientation arrow ($\theta$).
+4. **HA Output:** Served as a standard Home Assistant `camera` entity with dynamic revision incrementing for real-time frontend refreshes in `botslab-vacuum-map-card`.
+
+### 6. Qihoo QPUSH Protocol
+* **Protocol:** Proprietary binary TCP push protocol used for instant event notifications.
+* **Gateway Discovery:** Dynamically queries `dp.push.dc.360.cn?appId=gqrwex6nq54m` to discover regional push gateways, establishing a persistent raw binary TCP socket on Port 443 (primary) or Port 80 (fallback).
+* **Two-Stage Polling Strategy:**
+  - **Active Cleaning (5s):** High-frequency 5-second polling interval with prioritized OSS map sync.
+  - **Idle / Docked (5 minutes):** 300-second idle interval to conserve network bandwidth and robot CPU, awakened instantly by inbound QPUSH `OP_PUSH` frames.
+
+### 7. Alibaba Cloud (Aliyun) Alink & Downlink Commands
+* Botslab S8/S10 robots run on the **Alibaba Cloud IoT (Alink)** platform, maintaining an active MQTT socket with regional Alibaba brokers.
+* Service calls like `start_clean`, `pause`, and `clean_rooms` are dispatched through Botslab's cloud tunnel into Alink downlink frames, waking the vacuum from deep sleep immediately.
+* **Why DeviceSecret is Neither Available Nor Required:**
+  - The `DeviceSecret` is burned into hardware EEPROM during manufacturing and never exposed.
+  - Alink permits only one active MQTT session per device: connecting directly as the robot would disconnect (*kick offline*) the physical hardware.
+  - Thus, the integration leverages the official `invoke_service` cloud tunnel, exactly as the mobile app does.
+
+### 8. Endpoints the Official App Contacts
+
+| Host | Purpose | Used by Integration? |
 |---|---|---|
-| `eu1-sapp-api.botslab.com` | Device list, properties, `invoke_service` commands, OTA | Yes |
-| `eu1-sapp-login.botslab.com` | QUC email/password authentication | Yes |
-| `eu1-ali-*-days.oss-eu-central-1.aliyuncs.com` | Map package upload/download over Alibaba OSS | Yes |
-| `dp.push.dc.360.cn` -> `8.211.52.133` | QPush gateway address lookup | Optional |
-| `eu1-video-iotext.botslab.com` | Firmware binary download | Not used |
-| `eu1-ad2-app.botslab.com` | Advertising | Not used |
-| `eu1-logs-app.botslab.com` | Telemetry / crash logs | Not used |
-| `ad.iot.360.cn`, `qos.live.360.cn`, `wenjuan.lap.360.cn`, `q5.jia.360.cn` | Ads, telemetry, surveys | Not used |
-| `q.smart.360.cn`, `passport.360.cn` | Legacy Qihoo 360 China backend (commands, records, map) | Used for `cn` region |
+| `*-sapp-api.botslab.com` | Device list, properties, `invoke_service` commands, map info | **Yes** (Primary API) |
+| `*-sapp-login.botslab.com` / `passport.360.cn` | QUC email/password authentication & token minting | **Yes** (Auth) |
+| `*-ali-*-days.oss-*.aliyuncs.com` | Live map packages and recorded floor plans | **Yes** (Map Engine) |
+| `dp.push.dc.360.cn` | Dynamic QPush gateway address resolution | **Yes** (QPUSH) |
+| `q.smart.360.cn` | Legacy Qihoo 360 China backend (S5, S6, S7, S9, X90) | **Yes** (China Mainland) |
+| `eu1-video-iotext.botslab.com` | Firmware binary downloads | No (OTA) |
+| `eu1-ad2-app.botslab.com`, `ad.iot.360.cn` | Mobile advertisements | No |
+| `eu1-logs-app.botslab.com`, `qos.live.360.cn` | Analytics and crash diagnostics | No |
 
-Region-specific equivalents exist for `eu1`, `eu2`, `na1`, `ap1`, and `cn` (legacy Qihoo 360 / 360 Smart Life backend at `q.smart.360.cn`).
+### 9. Stability Notice
 
-### 5. Stability warning
-
-This integration talks to **undocumented cloud endpoints** and signs requests with the signing key shipped inside the official Android app. If Botslab changes its API, the integration can stop working until it is updated. There is no compatibility guarantee.
+> [!WARNING]
+> This integration connects to proprietary cloud endpoints using signing credentials reverse-engineered from the official Android client. While engineered with extensive resilience and self-healing mechanisms, changes to Botslab's backend protocol could require integration updates.
 
 ---
 

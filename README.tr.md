@@ -36,7 +36,9 @@
 
 ## 🌟 Temel Özellikler
 
-- 🔐 **Otomatik Giriş:** ADB, root, paket koklama veya proxy gerekmez. Yalnızca Botslab mobil uygulama e-posta ve şifrenizi girmeniz yeterlidir.
+- 🔐 **Otomatik Giriş & Kendi Kendini İyileştirme:** ADB, root, paket koklama veya proxy gerekmez. Yalnızca Botslab mobil uygulama e-posta ve şifrenizi girmeniz yeterlidir.
+- 🔄 **Kendini İyileştiren Oturum Yönetimi (Session Self-Healing):** Mobil uygulama açıldığında oluşan oturum düşmelerini (`102003` *"başka bir cihazda oturum açıldı"*, `1015`) arka planda otomatik olarak yakalar; kayıtlı kimlik bilgileriyle sessizce yeniden tam giriş yaparak komutlarınızı düşürmez ve manuel yeniden giriş gerektirmez.
+- 📐 **Kriptografik Bulut-Gölge (Cloud-Shadow) Mimarisi:** Gömülü QUC oturum açma (DES-CBC `parad` + RSA-1024 `key` + MD5 `sig`), dinamik istek imzalama (`md5(appkey + m2 + sign_ts + sign_no + secret)`) ve Base64 JWS yetkilendirme başlığı yönetimi.
 - 🧹 **Kapsamlı Süpürge Kontrolleri:**
   - Başlat / Temizle, Duraklat, Durdur, Şarja Dön (Dock)
   - Fan Hızı seçimi (`Quiet`, `Standard`, `Medium`, `Max`)
@@ -46,8 +48,9 @@
 - 🚪 **Dinamik Oda Temizliği & Yasaklı Alanlar (No-Go Zones):**
   - Haritanızdaki bölünmüş odaları otomatik olarak tanır
   - Home Assistant üzerinden oda bazlı temizlik servislerini doğrudan tetikler
-  - **Yasaklı Alanlar (`SetFbdPlaces`):** Home Assistant servis çağrısıyla doğrudan haritaya sanal duvar ve girilmez alanlar tanımlayabilme
-- 🗺️ **Gelişmiş Yüksek Çözünürlüklü Harita & Dahili Kartlar:**
+  - **Yasaklı & Mop Yapılmaz Alanlar (`SetZones` / `SetFbdPlaces`):** Home Assistant servis çağrıları ve görsel harita kartı üzerinden doğrudan haritaya sanal duvar, girilmez alan ve paspas yapılmaz bölge ekleme/silme
+- 🗺️ **Saf Python Harita Motoru & Dahili Kartlar:**
+  - Alibaba Cloud OSS üzerinden doğrudan indirme, Base64 çözme ve sıfır bağımlılıklı saf Python LZ4 doluluk ızgarası açma
   - Pillow tabanlı dinamik kenar kırpma (auto-crop) ile gereksiz siyah boşlukları yok etme
   - Yeşil şarj istasyonu ikonu, canlı temizlik rotası ve robotun baktığı yönü gösteren yön oku
   - **Otomatik Yüklenen Dahili Kartlar:**
@@ -189,52 +192,144 @@ Derinlemesine protokol analizi, payload şemaları ve mimari detaylar için `doc
 
 ---
 
-## 🔬 Teknik Mimari
+## 🔬 Teknik Mimari ve Protokol Detayları
 
-Süpürgenin bulut iletişimi 3 katmanlı özel bir mimari üzerinde çalışır:
+Entegrasyon, Botslab cihazlarına tescilli bir **Bulut-Gölge (Cloud-Shadow) Cihaz Mimarisi** üzerinden bağlanır. Robot süpürge yerel ağınızda gelen bağlantıları dinlemez; buluta doğru Alink (Alibaba Cloud IoT) MQTT downlink tünelini sürekli açık tutar.
 
+```mermaid
+sequenceDiagram
+    autonumber
+    participant HA as Home Assistant (Entegrasyon)
+    participant QUC as 360 QUC Kimlik Doğrulama
+    participant Cloud as Botslab Bulutu (*-sapp-api)
+    participant OSS as Alibaba Cloud OSS
+    participant Robot as Fiziksel Robot Süpürge
+
+    Note over HA,QUC: 1. Otomatik (Headless) Oturum Başlatma
+    HA->>QUC: UserIntf.login (DES-CBC parad + RSA-1024 + MD5 imza)
+    QUC-->>HA: Qihoo Çerezleri (Q ve T belirteçleri)
+    HA->>Cloud: POST /v1/app/login (Q, T, m2)
+    Cloud-->>HA: Aktif Oturum (sid) ve push_alias
+
+    Note over HA,Cloud: 2. Bulut-Gölge Telemetri & Komutlar
+    HA->>Cloud: GET /v1/device/properties (imzalı sorgu + JWS başlığı)
+    Cloud-->>HA: Cihaz Gölge Telemetrisi (JSON)
+    HA->>Cloud: POST /v1/device/service/invoke (imzalı sorgu + JWS başlığı)
+    Cloud->>Robot: Alink Downlink (Başlat / Duraklat / Oda Temizliği)
+    Robot-->>Cloud: Komut Yürütme Onayı
+
+    Note over Robot,HA: 3. Harita Akışı ve Saf Python İşleme
+    Robot->>OSS: Harita Paketi Yükleme (LZ4 sıkıştırmalı)
+    HA->>Cloud: Harita Paketi OSS URL Talebi
+    Cloud-->>HA: Ön İmzalı OSS İndirme Bağlantısı
+    HA->>OSS: Harita Yükünü İndir
+    Note over HA: Saf Python LZ4 Açma + Pillow Kamera Çizimi
 ```
-[ Entegrasyon / Home Assistant ]
-               │
-               ▼ (1. HTTPS QUC Auth & invoke_service)
-     [ Botslab Bulut Sunucusu (eu1-sapp-api.botslab.com) ]
-               │                                   │
-               ▼ (2. Alink Downlink)               ▼ (3. QPUSH Ağ Geçidi)
-         [ Robot Süpürge ]                  [ Home Assistant Dinleyicisi ]
-  (Aliyun MQTT, Frankfurt sunucusu)       (Dinamik GSLB dp.push.dc.360.cn -> Port 443/80)
+
+### 1. Bulut-Gölge (Cloud-Shadow) Cihaz Mimarisi
+* **Yerel Ağda Port Açmaz:** Robot süpürge yerel ağınızda doğrudan HTTP/REST sunucusu veya WebSocket portu açmaz. Tüm mobil uygulama ve entegrasyon iletişimi bölgesel bulut API'si (`*-sapp-api.botslab.com`) üzerinden gerçekleşir.
+* **Çift Yönlü Gölge Senkronizasyonu:**
+  - **Uplink:** Robot süpürge durum parametrelerini (pil seviyesi, çalışma modu, sarf malzeme aşınması, anlık koordinatlar) buluttaki cihaz gölgesine iletir.
+  - **Downlink:** Home Assistant komutları `POST /v1/device/service/invoke` ile buluta gönderir; Botslab bulutu bu komutları Alink MQTT tüneli üzerinden doğrudan robotun aktif soketine aktarır.
+
+### 2. Otomatik (Headless) Kimlik Doğrulama
+ADB, root veya paket koklama (proxy) gerektirmez. Giriş işlemi arka planda iki adımda otomatik olarak tamamlanır:
+
+| Aşama | Uç Nokta | Kriptografik İşlem | Çıktı |
+|---|---|---|---|
+| **1. 360 QUC Girişi** | `POST https://passport.360.cn/request.php` (veya bölgesel sunucu) | • Parametreler **DES-CBC** ile şifrelenir (`parad`)<br>• Simetrik anahtar **RSA-1024** ile şifrelenir (`key`)<br>• İstek **MD5** ile imzalanır (`sig`) | Hesap belirteçleri: **`Q`** ve **`T`** |
+| **2. Botslab Uygulama Girişi** | `POST https://*-sapp-api.botslab.com/v1/app/login` | • `Q` ve `T` belirteçleri cihaz `m2` donanım kimliğiyle takas edilir | API oturum belirteci: **`sid`** & **`push_alias`** |
+
+### 3. İstek İmzalama ve Yetkilendirme Başlığı
+Botslab Bulut API'sine (`*-sapp-api.botslab.com`) gönderilen her istek iki katmanlı kriptografik doğrulama gerektirir:
+
+#### A. Kriptografik Sorgu İmzası (Signed Query)
+Her isteğin URL parametrelerinde MD5 ile üretilmiş bir imza yer alır:
+```text
+sign = MD5(appkey + m2 + sign_ts + sign_no + secret)
+```
+* **`appkey`**: Mobil istemciye gömülü bölgeye özel uygulama anahtarı.
+* **`m2`**: İlk kurulumda üretilen benzersiz cihaz donanım tanıtıcısı.
+* **`sign_ts`**: Milisaniye cinsinden Unix zaman damgası (`time.time() * 1000`).
+* **`sign_no`**: 16 karakterlik rastgele onaltılık (hex) nonce.
+* **`secret`**: İstemci `appkey` değerine karşılık gelen gizli imza anahtarı.
+
+#### B. JWS Yetkilendirme Başlığı (Authorization Header)
+Tüm cihaz uç noktaları Base64 ile kodlanmış JSON Web Signature (JWS) başlığı gerektirir:
+```http
+Authorization: jws <base64({ "q": "<Q>", "t": "<T>", "sid": "<sid>" })>
 ```
 
-### 1. Qihoo QPUSH Nedir?
-* **Protokol:** Qihoo ve Botslab tarafından anlık istemci bildirimleri için geliştirilmiş ikili (binary) bir TCP itme protokolüdür. Entegrasyon, bölgesel push gateway IP'lerini `dp.push.dc.360.cn?appId=gqrwex6nq54m` üzerinden dinamik çözer ve doğrudan ham ikili TCP Port 443 (öncelikli) veya Port 80 (yedek) ile bağlanır.
-* **Görevi:** QPUSH komut göndermek için **kullanılmaz**. Süpürge temizliğe başladığında, harita yüklediğinde veya hata verdiğinde bulut `OP_PUSH` paketi yollar ve Home Assistant arayüzü anında güncellenir.
-* **Çift Kademeli Dinamik Polling:** Entegrasyon, aktif temizlik esnasında her **5 saniyede bir** veri çeker. Cihaz şarjdayken veya boştayken Wi-Fi ağını ve robot işlemcisini yormamak için **5 dakikalık (300s)** bekleme moduna geçer. Herhangi bir durum değişikliğinde QPUSH TCP soketi Home Assistant'ı derhal uyandırır.
+### 4. Kendini İyileştiren Otomatik Oturum Yönetimi (Session Self-Healing)
+> [!IMPORTANT]
+> **Tekil Oturum Kuralı:** Botslab bulut mimarisi hesap başına aynı anda tek bir aktif oturuma izin verir. Telefonunuzda resmî Botslab mobil uygulamasını açtığınızda Home Assistant'ın oturumu sonlandırılır ve API `102003` (*"başka bir cihazda oturum açıldı"*) veya `1015` (*"geçersiz/eksik oturum"*) kodunu döndürür.
 
-### 2. Alibaba Cloud (Aliyun) Alink ve Downlink Komutları
-* Botslab S8 donanımı **Alibaba Cloud IoT (Alink)** platformunu kullanır.
-* Süpürge bekleme/uyku modundayken Alibaba'nın Frankfurt broker'ına aktif bir Alink MQTT bağlantısı tutar.
-* Biz Home Assistant'tan başlat, durdur veya oda temizliği komutu gönderdiğimizde, Botslab Bulutu kurumsal Alibaba Cloud yetkileriyle Alink downlink tünelinden süpürgenin aktif soketine komutu iletir ve cihazı anında uyandırır.
+* **Otomatik Yakalama:** Entegrasyon tüm oturum düşme hata kodlarını (`100003`, `102008`, `102003`, `1015`, `1002`, `1003`, `401`) otomatik olarak yakalar.
+* **Arka Planda Şeffaf Yenileme:** Oturum düştüğünde koordinatör kayıtlı kimlik bilgileriyle arka planda sessizce yeniden tam giriş yapar, `Q`, `T` ve `sid` belirteçlerini günceller ve bekleyen kullanıcı komutunu veya durum sorgusunu tekrar dener.
+* **Kesintisiz Kullanım:** Aile bireyleri telefon uygulamasını açsa dahi Home Assistant süpürge kontrolünü hiçbir zaman kaybetmez; kullanıcıya hata uyarısı veya yeniden giriş bildirimi yansıtılmaz.
 
-### 3. DeviceSecret Neden Gerekli Değildir?
-* Alibaba Cloud IoT platformuna doğrudan cihaz gibi bağlanmak için bir `DeviceSecret` gerekir.
-* Bu anahtar üretim sırasında robotun **donanımsal güvenli EEPROM hafızasına** yazılır; mobil uygulamaya veya bulut hesabına asla aktarılmaz.
-* Ayrıca Alibaba Cloud IoT **cihaz adı başına tek bir aktif MQTT oturumuna** izin verir. Cihaz gibi doğrudan bağlanmaya çalışmak evinizdeki gerçek süpürgenin bağlantısını koparacaktır.
-* Bu sebeple bu entegrasyon resmî mobil uygulamanın yaptığı gibi `invoke_service` API tünelini kullanır.
+### 5. Alibaba Cloud OSS Harita Hattı ve Sunucu Taraflı Çizim
+Harita kareleri doğrudan Alibaba Cloud Object Storage Service (OSS) üzerinden indirilir ve saf Python kullanılarak sunucu tarafında çizilir:
 
-### 4. Resmî Uygulamanın Bağlandığı Adresler
+```mermaid
+flowchart LR
+    A["Alibaba Cloud OSS<br>(*.oss-*.aliyuncs.com)"] -->|"Paketi İndir"| B["Base64 Çözücü"]
+    B --> C["Saf Python LZ4<br>Blok Açıcı"]
+    C --> D["2D Doluluk Izgarası<br>(Engeller / Açık alan)"]
+    D --> E["Pillow Motoru<br>+ Dinamik Katmanlar"]
+    E --> F["Canlı Kamera Varlığı<br>(camera.botslab_map_camera)"]
 
-Resmî uygulamanın ağ trafiği incelendiğinde **hiçbir yerel/özel ağ adresiyle iletişim kurmadığı** görülür. Süpürge yerel ağdan gelen bağlantıları kabul etmez, dışarıdaki buluta bağlanır. Entegrasyonun kullandığı adresler:
+    subgraph Dinamik Katmanlar
+        G["Şarj İstasyonu İkonu"]
+        H["Canlı Robot Konumu & Yönü"]
+        I["Temizlik Rotası Çizgisi"]
+        J["Oda Poligonları & Merkezleri"]
+        K["Yasaklı Alanlar & Duvarlar"]
+    end
+    Dinamik Katmanlar --> E
+```
 
-| Sunucu | Amaç | Kullanılıyor mu? |
+1. **OSS İndirme:** En güncel harita paketi için bulut gölgesinden ön imzalı indirme bağlantısı alınır (`MapPkgOssInfo`).
+2. **Saf Python LZ4 Açıcı:** Harita paketi Base64 ile kodlanmış LZ4 sıkıştırmalı 2D doluluk ızgarası içerir. Harici bağımlılık gerektirmeyen gömülü saf Python LZ4 blok açıcımız bayt akışını doğrudan bellekte açar.
+3. **Pillow Vektör Katman Motoru:**
+   - **Otomatik Kırpma (Auto-Crop):** Geniş siyah kenar boşluklarını otomatik tespit ederek kırpar.
+   - **Oda Bölümleme:** Ayrıştırılmış odaları renk kodlarıyla boyar ve merkez etiket koordinatlarını hesaplar.
+   - **Donanım Katmanları:** Şarj istasyonunu, sanal duvarları ve paspas yapılmaz bölgeleri işler.
+   - **Anlık Telemetri:** Canlı temizlik rotasını ve robotun güncel baktığı yön açısını ($\theta$) yön okuyla çizer.
+4. **HA Çıktısı:** Home Assistant'ta standart `camera` varlığı olarak sunulur; harita revizyon sayacı sayesinde `botslab-vacuum-map-card` arayüzünde anında güncellenir.
+
+### 6. Qihoo QPUSH Protokolü
+* **Protokol:** Anlık durum bildirimleri için kullanılan tescilli ikili TCP itme protokolüdür.
+* **Ağ Geçidi Keşfi:** Bölgesel push sunucu IP'leri `dp.push.dc.360.cn?appId=gqrwex6nq54m` sorgusuyla dinamik keşfedilir; Port 443 (öncelikli) veya Port 80 (yedek) üzerinden kalıcı ham binary TCP bağlantısı kurulur.
+* **Çift Kademeli Polling Stratejisi:**
+  - **Aktif Temizlik (5s):** Canlı harita akışıyla senkronize 5 saniyelik seri telemetri sorgusu.
+  - **Boşta / Şarjda (5 dakika):** Ağ bant genişliğini ve robot işlemcisini korumak için 300 saniyelik rölanti modu; gelen QPUSH `OP_PUSH` paketleriyle anında uyandırılır.
+
+### 7. Alibaba Cloud (Aliyun) Alink ve Downlink Komutları
+* Botslab S8/S10 robotları **Alibaba Cloud IoT (Alink)** platformunu kullanır ve bölgesel Alibaba broker'ı ile sürekli aktif bir MQTT soketi tutar.
+* `start_clean`, `pause`, `clean_rooms` gibi servis çağrıları Botslab bulut tüneli üzerinden Alink downlink paketlerine dönüştürülerek robotu uykudan anında uyandırır.
+* **DeviceSecret Neden Gerekli Değildir?**
+  - `DeviceSecret` anahtarı üretim aşamasında robotun donanımsal EEPROM hafızasına kazınır ve dışarı sızdırılmaz.
+  - Alink platformu cihaz adı başına yalnızca tek bir aktif MQTT oturumuna izin verir: cihaz gibi bağlanmaya çalışmak evinizdeki fiziksel robotun bağlantısını koparacaktır.
+  - Bu sebeple entegrasyon, mobil uygulamanın kullandığı resmî `invoke_service` bulut tünelini kullanır.
+
+### 8. Resmî Uygulamanın İletişim Kurduğu Uç Noktalar
+
+| Sunucu | Amaç | Entegrasyon Kullanıyor mu? |
 |---|---|---|
-| `eu1-sapp-api.botslab.com` | Cihaz listesi, özellikler, `invoke_service` komutları, OTA | Evet |
-| `eu1-sapp-login.botslab.com` | QUC e-posta/şifre kimlik doğrulaması | Evet |
-| `eu1-ali-*-days.oss-eu-central-1.aliyuncs.com` | Alibaba OSS üzerinden harita paketi indirme/yükleme | Evet |
-| `dp.push.dc.360.cn` -> `8.211.52.133` | QPush sunucu IP çözümlemesi | İsteğe bağlı |
-| `q.smart.360.cn`, `passport.360.cn` | Eski Qihoo 360 Çin altyapısı (komutlar, harita) | `cn` bölgesi için |
+| `*-sapp-api.botslab.com` | Cihaz listesi, özellikler, `invoke_service` komutları, harita bilgisi | **Evet** (Ana API) |
+| `*-sapp-login.botslab.com` / `passport.360.cn` | QUC e-posta/şifre kimlik doğrulama & oturum açma | **Evet** (Kimlik Doğrulama) |
+| `*-ali-*-days.oss-*.aliyuncs.com` | Canlı harita paketleri ve kayıtlı kat planları | **Evet** (Harita Motoru) |
+| `dp.push.dc.360.cn` | Dinamik QPush ağ geçidi IP çözümleme | **Evet** (QPUSH) |
+| `q.smart.360.cn` | Eski Qihoo 360 Çin sunucusu (S5, S6, S7, S9, X90) | **Evet** (Çin Anakara) |
+| `eu1-video-iotext.botslab.com` | Firmware ikili dosya indirmeleri | Hayır (OTA) |
+| `eu1-ad2-app.botslab.com`, `ad.iot.360.cn` | Mobil reklamlar | Hayır |
+| `eu1-logs-app.botslab.com`, `qos.live.360.cn` | Analitik ve hata günlükleri | Hayır |
 
-### 5. Stabilite Uyarısı
+### 9. Stabilite Uyarısı
 
-Bu entegrasyon **belgelenmemiş bulut endpoint'lerine** ve resmî Android uygulamasının içindeki imza anahtarına dayanır. Botslab API'yi değiştirirse entegrasyon güncellenene kadar çalışmayabilir. Uyumluluk garantisi verilmemektedir.
+> [!WARNING]
+> Bu entegrasyon resmî Android uygulamasından tersine mühendislikle elde edilen imza anahtarlarına ve tescilli bulut uç noktalarına dayanır. Entegrasyon kapsamlı hata toleransı ve kendi kendini iyileştirme mekanizmalarıyla donatılmış olsa da Botslab'ın sunucu protokolünde yapacağı değişiklikler entegrasyonun güncellenmesini gerektirebilir.
 
 ---
 

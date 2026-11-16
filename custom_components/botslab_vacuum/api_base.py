@@ -179,6 +179,7 @@ class BotslabBaseApiClient:
         self.base_url = f"https://{reg_info['api']}"
         self.is_legacy_360: bool = bool(reg_info.get("legacy", False))
         self._auth_lock: asyncio.Lock = asyncio.Lock()
+        self.session_refresher: Any | None = None
 
         # Shared caching dictionaries
         self._cached_upload_id: str = ""

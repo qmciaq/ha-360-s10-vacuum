@@ -433,6 +433,7 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             )
         self.entry = entry
         self.api = api
+        self.api.session_refresher = self.ensure_valid_session
         self.poll_interval_active = poll_interval_active
         self.poll_interval_idle = poll_interval_idle
         self.enable_map = enable_map
@@ -458,31 +459,46 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
         """Return the current rendered map revision counter for a device."""
         return self._map_version.get(sn, 0)
 
-    async def ensure_valid_session(self) -> None:
+    def _handle_auth_failure_issue(self, err: Exception) -> None:
+        """Create reauth repair issue in Home Assistant."""
+        async_create_issue(
+            self.hass,
+            DOMAIN,
+            f"reauth_required_{self.entry.entry_id}",
+            is_fixable=True,
+            issue_domain=DOMAIN,
+            severity=IssueSeverity.ERROR,
+            translation_key="reauth_required",
+            translation_placeholders={"email": self.entry.data.get(CONF_EMAIL, "")},
+            data={"entry_id": self.entry.entry_id},
+        )
+
+    async def ensure_valid_session(self, force_refresh: bool = False) -> None:
         """Ensure API has a valid session id and push alias, re-authenticating if necessary."""
-        if self.api.sid and self.api.push_alias:
+        if not force_refresh and self.api.sid and self.api.push_alias:
             return
 
-        # 1. Try to mint a new session id using existing Q and T tokens first
-        if self.api.q and self.api.t:
+        # 1. Try to mint a new session id using existing Q and T tokens first (if not forcing full reauth)
+        if not force_refresh and self.api.q and self.api.t:
             try:
                 _LOGGER.debug("Obtaining session sid using existing Q/T tokens...")
                 await self.api.app_login()
+                async_delete_issue(self.hass, DOMAIN, f"reauth_required_{self.entry.entry_id}")
                 if self.api.sid and self.api.push_alias:
                     return
             except BotslabAuthError as err:
-                _LOGGER.debug("Existing Q/T tokens expired or rejected: %s", err)
+                _LOGGER.debug("Existing Q/T tokens expired or rejected (%s), falling back to email/password...", err)
                 self.api.sid = None
                 self.api.push_alias = None
 
-        # 2. Existing tokens are missing or expired; refresh them using email and password
+        # 2. Existing tokens are missing, expired or forced: full login using email and password
         email = self.entry.data.get(CONF_EMAIL)
         password = self.entry.data.get(CONF_PASSWORD)
         region = self.entry.data.get(CONF_REGION, "eu1")
         m2 = self.entry.data.get(CONF_M2, self.api.m2)
 
         if email and password:
-            _LOGGER.info("Refreshing Botslab session tokens using email/password...")
+            _LOGGER.info("Refreshing Botslab session tokens using email/password (recovering from session eviction)...")
             tokens = await async_login(self.api.session, region, email, password, m2)
             self.api.q = tokens["q"]
             self.api.t = tokens["t"]
@@ -500,23 +516,14 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             raise BotslabAuthError("No valid session tokens or credentials available")
 
         await self.api.app_login()
+        async_delete_issue(self.hass, DOMAIN, f"reauth_required_{self.entry.entry_id}")
 
     async def _async_update_data(self) -> dict[str, BotslabVacuumDevice]:
         """Fetch data from Botslab IoT Cloud."""
         try:
             await self.ensure_valid_session()
         except BotslabAuthError as err:
-            async_create_issue(
-                self.hass,
-                DOMAIN,
-                f"reauth_required_{self.entry.entry_id}",
-                is_fixable=True,
-                issue_domain=DOMAIN,
-                severity=IssueSeverity.ERROR,
-                translation_key="reauth_required",
-                translation_placeholders={"email": self.entry.data.get(CONF_EMAIL, "")},
-                data={"entry_id": self.entry.entry_id},
-            )
+            self._handle_auth_failure_issue(err)
             raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
         except Exception as err:
             raise UpdateFailed(f"Session setup failed: {err}") from err
@@ -524,23 +531,14 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
         try:
             device_list = await self.api.get_devices()
         except BotslabAuthError as err:
+            _LOGGER.info("Device list query failed with auth error (%s), attempting full re-login...", err)
             self.api.sid = None
             try:
-                await self.ensure_valid_session()
+                await self.ensure_valid_session(force_refresh=True)
                 device_list = await self.api.get_devices()
-            except BotslabAuthError:
-                async_create_issue(
-                    self.hass,
-                    DOMAIN,
-                    f"reauth_required_{self.entry.entry_id}",
-                    is_fixable=True,
-                    issue_domain=DOMAIN,
-                    severity=IssueSeverity.ERROR,
-                    translation_key="reauth_required",
-                    translation_placeholders={"email": self.entry.data.get(CONF_EMAIL, "")},
-                    data={"entry_id": self.entry.entry_id},
-                )
-                raise ConfigEntryAuthFailed(f"Authentication failed: {err}") from err
+            except BotslabAuthError as reauth_err:
+                self._handle_auth_failure_issue(reauth_err)
+                raise ConfigEntryAuthFailed(f"Authentication failed after re-login: {reauth_err}") from reauth_err
         except Exception as err:
             raise UpdateFailed(f"Error fetching device list: {err}") from err
 
@@ -557,6 +555,15 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
 
             try:
                 props, _ = await self.api.get_property_extended(sn, pk)
+            except BotslabAuthError as auth_err:
+                _LOGGER.info("Fetching properties for %s hit auth error (%s), refreshing session...", sn, auth_err)
+                self.api.sid = None
+                try:
+                    await self.ensure_valid_session(force_refresh=True)
+                    props, _ = await self.api.get_property_extended(sn, pk)
+                except Exception as retry_err:
+                    _LOGGER.warning("Could not fetch properties for %s after session refresh: %s", sn, retry_err)
+                    props = {}
             except Exception as err:
                 _LOGGER.warning("Could not fetch properties for %s: %s", sn, err)
                 props = {}

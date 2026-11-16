@@ -353,8 +353,18 @@ class BotslabModernClient(BotslabBaseApiClient):
     async def _handle_auth_retry(self) -> None:
         """Refresh session token when expired or stolen."""
         async with self._auth_lock:
-            _LOGGER.info("Session expired, automatically re-authenticating with cloud...")
-            await self.app_login()
+            _LOGGER.info("Session expired or evicted, automatically re-authenticating with cloud...")
+            try:
+                await self.app_login()
+            except BotslabAuthError as err:
+                if self.session_refresher is not None:
+                    _LOGGER.info(
+                        "app_login with existing Q/T failed (%s), invoking full session refresher...",
+                        err,
+                    )
+                    await self.session_refresher(force_refresh=True)
+                else:
+                    raise
 
     async def get_devices(self) -> list[dict[str, Any]]:
         """Fetch all user devices from IoT Device List."""

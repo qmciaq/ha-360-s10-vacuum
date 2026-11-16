@@ -1787,7 +1787,7 @@ def test_manifest_version_is_1_1_6():
 
     manifest_path = Path(__file__).parent.parent / "custom_components" / "botslab_vacuum" / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert data["version"] in ("1.1.6", "1.1.7", "1.1.8", "1.1.9", "1.1.10", "1.1.11", "1.1.12", "1.1.13", "1.1.14", "1.1.15", "1.1.16", "1.1.17", "1.2.0", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5", "1.2.6", "1.2.7", "1.2.8", "1.2.9", "1.3.0", "1.3.1", "1.3.2")
+    assert data["version"] in ("1.1.6", "1.1.7", "1.1.8", "1.1.9", "1.1.10", "1.1.11", "1.1.12", "1.1.13", "1.1.14", "1.1.15", "1.1.16", "1.1.17", "1.2.0", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5", "1.2.6", "1.2.7", "1.2.8", "1.2.9", "1.3.0", "1.3.1", "1.3.2", "1.3.3", "1.4.0")
     assert data["categories"] == ["appliances_cleaning.cleaning"]
 
 
@@ -3135,6 +3135,131 @@ def test_floor_map_entries_disambiguate_duplicate_names():
         {"id": 2, "name": "Home (2)"},
         {"id": 3, "name": "Map 3"},
     ]
+
+
+# ------------------------------------------------- session self-healing
+def test_auth_expired_codes_include_session_eviction():
+    """Verify AUTH_EXPIRED_CODES includes 102003 (another device) and 1015 (session invalid)."""
+    from custom_components.botslab_vacuum.const import AUTH_EXPIRED_CODES
+
+    assert 102003 in AUTH_EXPIRED_CODES
+    assert 1015 in AUTH_EXPIRED_CODES
+    assert 100003 in AUTH_EXPIRED_CODES
+
+
+@pytest.mark.asyncio
+async def test_api_handle_auth_retry_calls_session_refresher_on_failure():
+    """Verify _handle_auth_retry calls session_refresher(force_refresh=True) when app_login fails."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.botslab_vacuum.api_botslab import BotslabModernClient
+    from custom_components.botslab_vacuum.exceptions import BotslabAuthError
+
+    client = BotslabModernClient(MagicMock(), "eu1", "m2", "q", "t")
+    client.app_login = AsyncMock(side_effect=BotslabAuthError("Session expired (102003)"))
+    refresher_mock = AsyncMock()
+    client.session_refresher = refresher_mock
+
+    await client._handle_auth_retry()
+    refresher_mock.assert_called_once_with(force_refresh=True)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_ensure_valid_session_force_refresh():
+    """Verify coordinator.ensure_valid_session(force_refresh=True) fetches new Q/T via email/password and calls app_login."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    from custom_components.botslab_vacuum.coordinator import BotslabVacuumCoordinator
+
+    coord = MagicMock(spec=BotslabVacuumCoordinator)
+    coord.api = MagicMock()
+    coord.api.session = MagicMock()
+    coord.api.m2 = "fake_m2"
+    coord.api.sid = "old_sid"
+    coord.api.push_alias = "old_alias"
+    coord.api.app_login = AsyncMock()
+    coord.entry = MagicMock()
+    coord.entry.entry_id = "test_entry_id"
+    coord.entry.data = {
+        "email": "test@example.com",
+        "password": "mypassword",
+        "region": "eu1",
+        "m2": "fake_m2",
+    }
+    coord.hass = MagicMock()
+
+    with patch(
+        "custom_components.botslab_vacuum.coordinator.async_login",
+        new=AsyncMock(return_value={"q": "new_q", "t": "new_t", "qid": "12345"}),
+    ) as mock_login, patch(
+        "custom_components.botslab_vacuum.coordinator.async_delete_issue"
+    ) as mock_del_issue:
+        await BotslabVacuumCoordinator.ensure_valid_session(coord, force_refresh=True)
+
+        mock_login.assert_called_once_with(coord.api.session, "eu1", "test@example.com", "mypassword", "fake_m2")
+        assert coord.api.q == "new_q"
+        assert coord.api.t == "new_t"
+        assert coord.api.qid == "12345"
+        coord.hass.config_entries.async_update_entry.assert_called_once()
+        coord.api.app_login.assert_called_once()
+        mock_del_issue.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_update_data_recovers_from_auth_error():
+    """Verify _async_update_data re-authenticates and retries if get_property_extended raises BotslabAuthError."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.botslab_vacuum.coordinator import BotslabVacuumCoordinator
+    from custom_components.botslab_vacuum.exceptions import BotslabAuthError
+    from custom_components.botslab_vacuum.models import BotslabVacuumDevice
+
+    coord = MagicMock(spec=BotslabVacuumCoordinator)
+    coord.hass = MagicMock()
+    coord.entry = MagicMock()
+    coord.entry.entry_id = "test_entry_id"
+    coord.data = {}
+    coord._firmware_cache = {}
+    coord._base_station_cache = {}
+    coord._last_clean_status = {}
+    coord._cleaning_paths = {}
+    coord._last_rendered_pose = {}
+    coord._map_cache = {}
+    coord._map_version = {}
+    coord._pending_area_writes = {}
+    coord._saved_no_go_zones = {}
+    coord._saved_carpets = {}
+    coord._last_active_state = False
+    coord._last_map_sync_time = {}
+    coord.update_interval = None
+    coord._rooms_cache = {}
+    coord._dsl_cache = {}
+    coord._multi_maps_cache = {}
+    coord.enable_map = False
+    coord.poll_interval_active = 10
+    coord.poll_interval_idle = 30
+    coord.ensure_valid_session = AsyncMock()
+    coord.api = MagicMock()
+    coord.api.is_legacy_360 = False
+    coord.api.session = MagicMock()
+    coord.api.get_cached_map_info = MagicMock(return_value=None)
+    coord.api.get_cached_rooms = MagicMock(return_value=[])
+    coord.api.get_dsl = AsyncMock(return_value={})
+    coord.api.get_devices = AsyncMock(return_value=[{
+        "device_name": "SN123",
+        "product_key": "PK123",
+        "device_title": "Botslab Robot",
+        "ip": "192.168.1.10",
+        "version": "1.0.0",
+    }])
+
+    coord.api.get_property_extended = AsyncMock(
+        side_effect=[BotslabAuthError("Session expired (102003)"), ({"battery": 90, "mode": "1"}, 123456)]
+    )
+
+    result = await BotslabVacuumCoordinator._async_update_data(coord)
+
+    assert "SN123" in result
+    coord.ensure_valid_session.assert_any_call(force_refresh=True)
+    assert coord.api.get_property_extended.call_count == 2
+
 
 
 

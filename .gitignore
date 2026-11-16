@@ -12,6 +12,7 @@ botslab_map_card.yaml
 
 # Local scratch / reverse-engineering artifacts (never publish)
 HANDOFF_IMPROVEMENT_REPORT.md
+HANDOFF_REPORT*.md
 docs/botslab_network_and_telemetry_architecture.md
 botslab_network_and_telemetry_architecture.md
 live_test_robot.py

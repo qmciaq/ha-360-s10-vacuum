@@ -832,9 +832,11 @@ class BotslabModernClient(BotslabBaseApiClient):
         self._cached_is_active = False
         if sn:
             self._cached_map_info.pop(sn, None)
+            self._cached_map_geom.pop(sn, None)
             self._cached_rooms.pop(sn, None)
         else:
             self._cached_map_info.clear()
+            self._cached_map_geom.clear()
             self._cached_rooms.clear()
 
     async def get_live_map(
@@ -854,6 +856,9 @@ class BotslabModernClient(BotslabBaseApiClient):
         map_info = self._build_map_info(map_json)
         if map_info and map_info.rooms:
             self._cached_rooms[sn] = map_info.rooms
+        if sn in self._cached_map_geom and map_info:
+            geom = self._cached_map_geom[sn]
+            map_info.cmin, map_info.cmax, map_info.rmin, map_info.rmax, map_info.scale = geom
         self._cached_map_info[sn] = map_info
 
         oss_info = self._parse_oss_info(props.get("MapPkgOssInfo"))
@@ -922,6 +927,7 @@ class BotslabModernClient(BotslabBaseApiClient):
                 carpets=map_info.carpets if map_info else [],
                 scale=4,
             )
+            self._cached_map_geom[sn] = geom
             if map_info:
                 map_info.cmin = geom[0]
                 map_info.cmax = geom[1]

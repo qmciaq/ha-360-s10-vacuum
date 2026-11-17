@@ -1787,7 +1787,7 @@ def test_manifest_version_is_1_1_6():
 
     manifest_path = Path(__file__).parent.parent / "custom_components" / "botslab_vacuum" / "manifest.json"
     data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    assert data["version"] in ("1.1.6", "1.1.7", "1.1.8", "1.1.9", "1.1.10", "1.1.11", "1.1.12", "1.1.13", "1.1.14", "1.1.15", "1.1.16", "1.1.17", "1.2.0", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5", "1.2.6", "1.2.7", "1.2.8", "1.2.9", "1.3.0", "1.3.1", "1.3.2", "1.3.3", "1.4.0")
+    assert data["version"] in ("1.1.6", "1.1.7", "1.1.8", "1.1.9", "1.1.10", "1.1.11", "1.1.12", "1.1.13", "1.1.14", "1.1.15", "1.1.16", "1.1.17", "1.2.0", "1.2.1", "1.2.2", "1.2.3", "1.2.4", "1.2.5", "1.2.6", "1.2.7", "1.2.8", "1.2.9", "1.3.0", "1.3.1", "1.3.2", "1.3.3", "1.3.4", "1.4.0")
     assert data["categories"] == ["appliances_cleaning.cleaning"]
 
 
@@ -3278,6 +3278,57 @@ async def test_legacy_360_send_cmd_recovers_from_auth_error():
     assert res["errno"] == 0
     refresher_mock.assert_called_once_with(force_refresh=True)
     assert api._legacy_client.send_legacy_360_cmd.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_map_calibration_preserves_scale_and_geom_on_cache_hit():
+    """Verify get_live_map preserves scale=4 and crop bounds across repeated calls."""
+    import base64
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.botslab_vacuum.api import BotslabVacuumApi
+
+    api = BotslabVacuumApi(MagicMock(), region="eu1", m2="test_m2", q="q", t="t")
+    b64_map = base64.b64encode(b"compressed_fake_map").decode("utf-8")
+    map_json = {
+        "width": 20,
+        "height": 20,
+        "resolution": 0.05,
+        "x_min": -0.5,
+        "y_min": -0.5,
+        "map": b64_map,
+        "cleanId": "CLEAN_1",
+        "smartArea": {
+            "value": [
+                {"id": 1, "name": "Room 1", "vertexs": [[0, 0], [100, 0], [100, 100], [0, 100]]},
+            ]
+        },
+    }
+    props = {"MapPkgOssInfo": '{"UploadID": "UP_1", "CleanID": "CLEAN_1"}'}
+    api.get_map_json = AsyncMock(return_value=(map_json, props))
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(
+            "custom_components.botslab_vacuum.api_botslab._get_lz4_decompressor",
+            lambda: lambda comp, size: b"\x7f" * size,
+        )
+        # First call: renders map with scale=4
+        bytes_1 = await api.get_live_map("SN_TEST", "PK_TEST")
+        assert bytes_1 is not None
+        info_1 = api.get_cached_map_info("SN_TEST")
+        assert info_1 is not None
+        assert info_1.scale == 4
+        cal_1 = info_1.calibration_points()
+        assert len(cal_1) == 3
+
+        # Second call: cache hit
+        bytes_2 = await api.get_live_map("SN_TEST", "PK_TEST")
+        assert bytes_2 == bytes_1
+        info_2 = api.get_cached_map_info("SN_TEST")
+        assert info_2 is not None
+        assert info_2.scale == 4
+        cal_2 = info_2.calibration_points()
+        assert cal_2 == cal_1
+
 
 
 

@@ -188,6 +188,7 @@ class BotslabBaseApiClient:
         self._cached_is_active: bool = False
         self._cached_rooms: dict[str, Any] = {}
         self._cached_map_info: dict[str, Any] = {}
+        self._cached_map_geom: dict[str, tuple[int, int, int, int, int]] = {}
         self.cached_s3_signs: dict[str, str] = {}
         self._firmware_cache: dict[str, str] = {}
 

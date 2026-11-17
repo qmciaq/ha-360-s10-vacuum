@@ -155,6 +155,8 @@ class BotslabMapInfo:
         cy = (y_mm / 1000.0 - self.y_min) / self.resolution
         if self.scale > 1 and self.cmax > self.cmin:
             return ((cx - self.cmin) * self.scale, (self.rmax - cy) * self.scale)
+        if self.scale > 1:
+            return (cx * self.scale, (self.height - 1 - cy) * self.scale)
         py = self.height - cy
         return (cx, py)
 
@@ -170,7 +172,7 @@ class BotslabMapInfo:
         Three corners are enough for the standard affine transform used by
         Lovelace map cards to map taps back to robot coordinates.
         """
-        if self.scale > 1 and self.cmax > self.cmin:
+        if self.scale > 1 and (self.cmax > self.cmin or self.rmax > self.rmin):
             pts = [
                 (self.x_min * 1000.0, self.y_min * 1000.0),
                 (self.x_min * 1000.0 + 1000.0, self.y_min * 1000.0),
@@ -196,11 +198,11 @@ class BotslabMapInfo:
             },
             {
                 "vacuum": {"x": round(right_mm), "y": round(bottom_mm)},
-                "map": {"x": self.width, "y": 0},
+                "map": {"x": self.width * self.scale, "y": 0},
             },
             {
                 "vacuum": {"x": round(left_mm), "y": round(top_mm)},
-                "map": {"x": 0, "y": self.height},
+                "map": {"x": 0, "y": self.height * self.scale},
             },
         ]
 

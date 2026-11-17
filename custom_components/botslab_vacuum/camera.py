@@ -96,11 +96,24 @@ class BotslabMapCamera(BotslabVacuumEntity, Camera):
         info = self._map_info
         if info is None:
             return {}
+        sc = info.scale if info.scale > 0 else 4
+        cmin, cmax = info.cmin, info.cmax
+        rmin, rmax = info.rmin, info.rmax
+        if cmax > cmin and rmax > rmin:
+            img_w = (cmax - cmin + 1) * sc
+            img_h = (rmax - rmin + 1) * sc
+        else:
+            img_w = info.width * sc
+            img_h = info.height * sc
         attrs = {
             "calibration_points": info.calibration_points(),
             "rooms": info.room_attributes(),
-            "map_width": info.width,
-            "map_height": info.height,
+            "map_width": img_w,
+            "map_height": img_h,
+            "image_width": img_w,
+            "image_height": img_h,
+            "grid_width": info.width,
+            "grid_height": info.height,
             "x_min": info.x_min,
             "y_min": info.y_min,
             "resolution": info.resolution,
@@ -162,12 +175,16 @@ class BotslabMapCamera(BotslabVacuumEntity, Camera):
         # The coordinator only fetches maps for active robots or on first
         # sight. Ask for it directly so a docked robot still shows its map.
         try:
-            return await self.coordinator.api.get_live_map(
+            map_bytes = await self.coordinator.api.get_live_map(
                 device.device_name,
                 device.product_key,
                 robot_pose=device.robot_pose,
                 cleaning_path=device.cleaning_path,
             )
+            if map_bytes:
+                device.map_image_bytes = map_bytes
+                device.map_info = self.coordinator.api.get_cached_map_info(device.device_name)
+            return map_bytes
         except Exception as err:  # noqa: BLE001 - surfaced through the log
             _LOGGER.debug("Map fetch for camera %s failed: %s", self._attr_unique_id, err)
             return None

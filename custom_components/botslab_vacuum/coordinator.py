@@ -451,6 +451,8 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
         self._saved_carpets: dict[str, list[dict[str, Any]]] = {}
         self._multi_maps_cache: dict[str, list[dict[str, Any]]] = {}
         self._saved_no_go_zones: dict[str, list[dict[str, Any]]] = {}
+        self._synced_map_on_boot: dict[str, bool] = {}
+        self._last_map_id: dict[str, str] = {}
         # Unix timestamp (with grace) until which a locally acknowledged area write must
         # not be overwritten by an older cloud map document.
         self._pending_area_writes: dict[str, float] = {}
@@ -694,6 +696,12 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             clean_id = str(oss_dict.get("CleanID", "")).strip()
             raw_map_id = str(oss_dict.get("MapID", "")).strip()
             map_id = raw_map_id if (raw_map_id and raw_map_id != "0") else clean_id
+            last_map_map = getattr(self, "_last_map_id", None)
+            if last_map_map is not None:
+                if map_id:
+                    last_map_map[sn] = map_id
+                elif sn in last_map_map:
+                    map_id = last_map_map[sn]
 
             ip_str = str(
                 props.get("wifiIP")
@@ -857,6 +865,14 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
                                 self._last_rendered_pose[sn] = list(robot_pose)
                         else:
                             map_bytes = self._map_cache.get(sn)
+                            synced_map = getattr(self, "_synced_map_on_boot", None)
+                            if map_bytes is None and synced_map is not None and not synced_map.get(sn):
+                                synced_map[sn] = True
+                                try:
+                                    _LOGGER.info("No map cached on startup for %s; triggering initial StartSyncMapPkgToOss", sn)
+                                    await self.api.start_map_sync(sn, pk, 60)
+                                except Exception as sync_err:
+                                    _LOGGER.debug("Initial map sync trigger error: %s", sync_err)
                     except Exception as err:
                         _LOGGER.debug("Live map fetch error for %s: %s", sn, err)
                         map_bytes = self._map_cache.get(sn)
@@ -1179,7 +1195,7 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
         return device_map
 
     async def async_refresh_rooms(self, sn: str) -> list[BotslabRoom]:
-        """Explicitly fetch latest room segmentation from active cloud map."""
+        """Explicitly fetch latest room segmentation from active cloud map and re-render."""
         dev = self.data.get(sn) if self.data else None
         pk = dev.product_key if dev else ""
         rooms = await self.api.fetch_rooms(sn, pk)
@@ -1187,6 +1203,22 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             self._rooms_cache[sn] = rooms
             if dev:
                 dev.rooms = rooms
+            self.api.clear_map_cache(sn)
+            try:
+                map_bytes = await self.api.get_live_map(
+                    sn,
+                    pk,
+                    robot_pose=dev.robot_pose if dev else None,
+                    cleaning_path=dev.cleaning_path if dev else None,
+                )
+                if map_bytes:
+                    self._map_cache[sn] = map_bytes
+                    self._map_version[sn] = self._map_version.get(sn, 0) + 1
+                    if dev:
+                        dev.map_image_bytes = map_bytes
+                        dev.map_info = self.api.get_cached_map_info(sn)
+            except Exception as err:
+                _LOGGER.debug("Re-render map on refresh_rooms failed: %s", err)
             self.async_set_updated_data(self.data)
         return rooms
 

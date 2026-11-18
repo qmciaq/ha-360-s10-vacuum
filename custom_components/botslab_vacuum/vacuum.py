@@ -25,7 +25,7 @@ from .const import (
 )
 from .coordinator import BotslabVacuumCoordinator
 from .entity import BotslabVacuumEntity
-from .models import BotslabVacuumDevice, floor_map_entries
+from .models import BotslabVacuumDevice, ensure_safe_attribute_size, floor_map_entries, simplify_points
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ class BotslabVacuumRobot(BotslabVacuumEntity, StateVacuumEntity):
         if not self.device:
             return {}
         dev = self.device
-        return {
+        attrs = {
             # Battery & live stats for botslab-vacuum-map-card
             "battery": dev.battery_level,
             "battery_level": dev.battery_level,
@@ -162,18 +162,23 @@ class BotslabVacuumRobot(BotslabVacuumEntity, StateVacuumEntity):
             "clean_id": dev.clean_id,
             "clean_sub_status": dev.clean_sub_status,
             "current_location": dev.current_location,
-            "cleaning_path": dev.cleaning_path,
+            "cleaning_path": simplify_points(dev.cleaning_path, epsilon=100.0, max_points=100) if dev.cleaning_path else [],
             "robot_pose": dev.robot_pose,
             "dock_position": dev.dock_position,
             "no_go_zones": dev.no_go_zones,
             "error_code": dev.error_code,
             "available_rooms": [
-                {"id": r.room_id, "name": r.name, "outline": [list(p) for p in r.outline]}
+                {
+                    "id": r.room_id,
+                    "name": r.name,
+                    "outline": simplify_points(r.outline, epsilon=50.0, max_points=80),
+                }
                 for r in dev.rooms
             ],
             "serial_number": dev.device_name,
             "product_key": dev.product_key,
         }
+        return ensure_safe_attribute_size(attrs)
 
     async def async_start(self) -> None:
         """Start or resume cleaning."""

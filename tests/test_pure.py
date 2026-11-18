@@ -3330,6 +3330,135 @@ async def test_map_calibration_preserves_scale_and_geom_on_cache_hit():
         assert cal_2 == cal_1
 
 
+def test_simplify_points_rdp():
+    """Verify Ramer-Douglas-Peucker simplification on various coordinate patterns."""
+    from custom_components.botslab_vacuum.models import simplify_points
+
+    # Empty / trivial lists
+    assert simplify_points([]) == []
+    assert simplify_points([[0, 0]]) == [[0, 0]]
+    assert simplify_points([[0, 0], [10, 10]]) == [[0, 0], [10, 10]]
+    assert simplify_points([[0, 0], [5, 5], [10, 10]]) == [[0, 0], [5, 5], [10, 10]]
+
+    # Straight line with 100 intermediate points should collapse to endpoints
+    straight_line = [[i * 10, i * 20] for i in range(100)]
+    simplified = simplify_points(straight_line, epsilon=5.0)
+    assert len(simplified) == 2
+    assert simplified[0] == [0, 0]
+    assert simplified[-1] == [990, 1980]
+
+    # Closed rectangular polygon with staircase stepping
+    rect_box = [
+        [0, 0], [25, 0], [50, 0], [100, 0],
+        [100, 25], [100, 50], [100, 100],
+        [75, 100], [50, 100], [0, 100],
+        [0, 50], [0, 25], [0, 0],
+    ]
+    box_sim = simplify_points(rect_box, epsilon=10.0)
+    assert len(box_sim) == 5
+    assert box_sim == [[0, 0], [100, 0], [100, 100], [0, 100], [0, 0]]
+
+    # Point capping enforcement
+    many_pts = [[i, (i % 2) * 500] for i in range(500)]
+    capped = simplify_points(many_pts, epsilon=10.0, max_points=50)
+    assert len(capped) <= 52  # Includes closing endpoint preservation
+
+
+def test_ensure_safe_attribute_size_prevents_recorder_warning():
+    """Verify attributes stay safely under Home Assistant's 16384 byte recorder limit."""
+    import json
+    from custom_components.botslab_vacuum.models import ensure_safe_attribute_size
+
+    # Small attrs: untouched
+    small_attrs = {"status": "cleaning", "battery": 95}
+    assert ensure_safe_attribute_size(small_attrs) == small_attrs
+
+    # Huge attrs with 5,000 cleaning points (>100KB)
+    huge_path = [[i * 10, (i % 10) * 100] for i in range(5000)]
+    huge_attrs = {
+        "status": "cleaning",
+        "cleaning_path": huge_path,
+        "path": huge_path,
+        "rooms": [
+            {"id": "1", "name": "Salon", "outline": [[0, 0], [1000, 0], [1000, 1000], [0, 1000]]}
+        ],
+    }
+    raw_size = len(json.dumps(huge_attrs))
+    assert raw_size > 100000
+
+    safe_attrs = ensure_safe_attribute_size(huge_attrs, max_bytes=14000)
+    safe_size = len(json.dumps(safe_attrs))
+    assert safe_size <= 14000
+    assert safe_attrs["status"] == "cleaning"
+
+
+def test_camera_and_vacuum_extra_state_attributes_under_limit():
+    """Verify camera and vacuum entities never exceed 16384 bytes during long cleaning sessions."""
+    import json
+    from custom_components.botslab_vacuum.camera import BotslabMapCamera
+    from custom_components.botslab_vacuum.models import (
+        BotslabMapInfo,
+        BotslabRoom,
+        BotslabVacuumDevice,
+    )
+    from custom_components.botslab_vacuum.vacuum import BotslabVacuumRobot
+    from unittest.mock import MagicMock
+
+    # Dense rooms mimicking a real house map with 4 rooms, 275 vertices
+    rooms = [
+        BotslabRoom(room_id="0", name="Room 2", outline=tuple((i * 10, (i % 5) * 20) for i in range(70))),
+        BotslabRoom(room_id="1", name="Salon", outline=tuple((i * 10, (i % 5) * 20) for i in range(80))),
+        BotslabRoom(room_id="2", name="Mutfak", outline=tuple((i * 10, (i % 5) * 20) for i in range(85))),
+        BotslabRoom(room_id="3", name="Oda 4", outline=tuple((i * 10, (i % 5) * 20) for i in range(40))),
+    ]
+    map_info = BotslabMapInfo(
+        width=512,
+        height=444,
+        scale=4,
+        x_min=-3000.0,
+        y_min=-4000.0,
+        resolution=0.05,
+        rooms=rooms,
+        dock_position=(1000.0, 1000.0),
+    )
+
+    # 2,000 points cleaning path (accumulated during a 45-minute clean)
+    long_path = [[-2850 + i * 10, -3100 + (i % 20) * 50] for i in range(2000)]
+
+    coord = MagicMock()
+    coord.enable_map = True
+    coord.routines = []
+    coord.get_map_version.return_value = 1
+
+    dev = BotslabVacuumDevice(
+        product_key="PK_TEST",
+        device_name="SN_TEST",
+        device_title="Oturma Odası Botslab S8",
+        cleaning_path=long_path,
+        robot_pose=[1420.0, -510.0, 90.0],
+        rooms=rooms,
+        map_info=map_info,
+    )
+    coord.data = {"SN_TEST": dev}
+
+    # 1. Camera Entity Attributes Check
+    cam = BotslabMapCamera(coord, dev)
+    cam_attrs = cam.extra_state_attributes
+    cam_size = len(json.dumps(cam_attrs))
+    assert cam_size < 14000, f"Camera attrs too large: {cam_size} bytes (Limit: 16384)"
+    assert "calibration_points" in cam_attrs
+    assert "rooms" in cam_attrs
+    assert len(cam_attrs["rooms"]) == 4
+
+    # 2. Vacuum Entity Attributes Check
+    vac = BotslabVacuumRobot(coord, dev)
+    vac_attrs = vac.extra_state_attributes
+    vac_size = len(json.dumps(vac_attrs))
+    assert vac_size < 14000, f"Vacuum attrs too large: {vac_size} bytes (Limit: 16384)"
+    assert "available_rooms" in vac_attrs
+
+
+
 
 
 

@@ -23,7 +23,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import BotslabVacuumCoordinator
 from .entity import BotslabVacuumEntity
-from .models import BotslabVacuumDevice
+from .models import BotslabVacuumDevice, ensure_safe_attribute_size, simplify_points
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -142,8 +142,9 @@ class BotslabMapCamera(BotslabVacuumEntity, Camera):
                 "a": float(device.robot_pose[2]) if len(device.robot_pose) >= 3 else 0.0,
             }
         if device and device.cleaning_path:
-            attrs["cleaning_path"] = device.cleaning_path
-            attrs["path"] = device.cleaning_path
+            simp_path = simplify_points(device.cleaning_path, epsilon=100.0, max_points=100)
+            attrs["cleaning_path"] = simp_path
+            attrs["path"] = simp_path
         if info.no_go_zones:
             attrs["no_go_zones"] = info.no_go_zones
         ws = ""
@@ -160,7 +161,7 @@ class BotslabMapCamera(BotslabVacuumEntity, Camera):
                 "rmax": info.rmax,
                 "scale": info.scale,
             }
-        return attrs
+        return ensure_safe_attribute_size(attrs)
 
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None

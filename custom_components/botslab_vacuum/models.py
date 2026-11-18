@@ -2,7 +2,130 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import json
+import math
 from typing import Any
+
+
+def simplify_points(
+    points: list[tuple[int, int]] | list[list[int]] | tuple[tuple[int, int], ...],
+    epsilon: float = 50.0,
+    max_points: int = 100,
+) -> list[list[int]]:
+    """Simplify a list of 2D coordinates using Ramer-Douglas-Peucker algorithm.
+
+    Reduces redundant collinear/staircase points while preserving shape fidelity,
+    keeping payload size well within Home Assistant's 16KB attribute limit.
+    """
+    if not points:
+        return []
+    if len(points) <= 3:
+        return [list(p) for p in points]
+
+    n = len(points)
+    stack = [(0, n - 1)]
+    keep = [False] * n
+    keep[0] = True
+    keep[n - 1] = True
+
+    while stack:
+        start_idx, end_idx = stack.pop()
+        start = points[start_idx]
+        end = points[end_idx]
+        dx = end[0] - start[0]
+        dy = end[1] - start[1]
+        line_len = math.hypot(dx, dy)
+
+        max_dist = 0.0
+        max_idx = start_idx
+
+        for i in range(start_idx + 1, end_idx):
+            p = points[i]
+            if line_len == 0:
+                dist = math.hypot(p[0] - start[0], p[1] - start[1])
+            else:
+                dist = abs(dy * p[0] - dx * p[1] + end[0] * start[1] - end[1] * start[0]) / line_len
+            if dist > max_dist:
+                max_dist = dist
+                max_idx = i
+
+        if max_dist > epsilon and max_idx != start_idx:
+            keep[max_idx] = True
+            stack.append((start_idx, max_idx))
+            stack.append((max_idx, end_idx))
+
+    res = [list(points[i]) for i in range(n) if keep[i]]
+    if len(res) > max_points:
+        step = math.ceil(len(res) / max_points)
+        res = res[::step]
+        if res[-1] != list(points[-1]):
+            res.append(list(points[-1]))
+    return res
+
+
+def ensure_safe_attribute_size(attrs: dict[str, Any], max_bytes: int = 14000) -> dict[str, Any]:
+    """Ensure state attributes do not exceed Home Assistant's 16384 byte recorder limit."""
+    try:
+        payload = json.dumps(attrs, default=str)
+        if len(payload) <= max_bytes:
+            return attrs
+    except Exception:
+        return attrs
+
+    trimmed = dict(attrs)
+
+    # Step 1: Remove redundant 'path' alias if both 'cleaning_path' and 'path' exist
+    if "path" in trimmed and "cleaning_path" in trimmed:
+        del trimmed["path"]
+        if len(json.dumps(trimmed, default=str)) <= max_bytes:
+            return trimmed
+
+    # Step 2: Remove cleaning trajectories from attributes (rendered map image already shows it)
+    if "cleaning_path" in trimmed:
+        del trimmed["cleaning_path"]
+        if len(json.dumps(trimmed, default=str)) <= max_bytes:
+            return trimmed
+    if "path" in trimmed:
+        del trimmed["path"]
+        if len(json.dumps(trimmed, default=str)) <= max_bytes:
+            return trimmed
+
+    # Step 3: Simplify rooms outlines further if rooms exist
+    if "rooms" in trimmed and isinstance(trimmed["rooms"], list):
+        smaller_rooms = []
+        for r in trimmed["rooms"]:
+            if isinstance(r, dict) and "outline" in r:
+                r_copy = dict(r)
+                r_copy["outline"] = simplify_points(r["outline"], epsilon=150.0, max_points=40)
+                smaller_rooms.append(r_copy)
+            else:
+                smaller_rooms.append(r)
+        trimmed["rooms"] = smaller_rooms
+        if len(json.dumps(trimmed, default=str)) <= max_bytes:
+            return trimmed
+
+    # Step 4: Drop outline from available_rooms if present in vacuum entity
+    if "available_rooms" in trimmed and isinstance(trimmed["available_rooms"], list):
+        trimmed["available_rooms"] = [
+            {k: v for k, v in r.items() if k != "outline"} if isinstance(r, dict) else r
+            for r in trimmed["available_rooms"]
+        ]
+        if len(json.dumps(trimmed, default=str)) <= max_bytes:
+            return trimmed
+
+    # Step 5: Fallback - drop outlines from rooms, keeping labels, ids & centroids
+    if "rooms" in trimmed and isinstance(trimmed["rooms"], list):
+        fallback_rooms = []
+        for r in trimmed["rooms"]:
+            if isinstance(r, dict):
+                r_copy = dict(r)
+                r_copy.pop("outline", None)
+                fallback_rooms.append(r_copy)
+            else:
+                fallback_rooms.append(r)
+        trimmed["rooms"] = fallback_rooms
+
+    return trimmed
 
 
 def floor_map_name(map_entry: dict[str, Any], seen: set[str] | None = None) -> str:
@@ -217,7 +340,7 @@ class BotslabMapInfo:
                 {
                     "id": room.room_id,
                     "name": room.name,
-                    "outline": [list(p) for p in room.outline],
+                    "outline": simplify_points(room.outline, epsilon=50.0, max_points=80),
                     "label": {"text": room.name, "x": cx, "y": cy, "offset_y": 35},
                     "icon": {"name": "mdi:floor-plan", "x": cx, "y": cy},
                 }

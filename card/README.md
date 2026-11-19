@@ -1,226 +1,142 @@
-<img src="icon.png" alt="Dreame" align="left" width="64" height="64" style="margin-right: 16px;">
+<img src="icon.png" alt="Botslab" align="left" width="64" height="64" style="margin-right: 16px;">
 
-# Dreame Vacuum Map Card
+# Botslab Vacuum Map Card
 
-A modern, beautiful Home Assistant Lovelace card for controlling Dreame robot vacuums. Built with React, TypeScript, and SCSS.
+A modern, high-performance Home Assistant Lovelace card for controlling Botslab & 360 robot vacuums. Built with React 19, TypeScript, and SCSS.
+
+Adapted from [`dreame-vacuum-map-card`](https://github.com/noambergauz/dreame-vacuum-map-card) by Noam Bergauz under the MIT License.
 
 <br clear="left">
 
+---
+
 ## Features
 
-- (Almost) complete feature parity with the original Dreame application
-- Support for **Room**, **All**, and **Zone** cleaning modes, including multiple zones
-- Interactive map with room and zone selection
-- CleanGenius and Custom cleaning mode configuration
-- **Per-room customized cleaning**: Configure suction level, wetness, and cleaning cycles for each room individually
-- **Dock popup**: station status and dock tasks while the robot is docked
-- **Shortcuts**: start, rename, and delete the shortcuts saved in the Botslab app
-- **Landscape layout**: controls beside the map on wide dashboards
-- Real-time vacuum status and battery level
-- **Theming**: follows the active Home Assistant theme, including custom themes and dark mode
-- **Internationalization**: follows the Home Assistant language, with English and Turkish packs and English fallback for any other language
+- **Live Interactive Map:** Real-time map rendering with zoom, pan, and smooth touch controls.
+- **Cleaning Modes:** Full support for **All (Whole House)**, **Room (Area/Segment)**, and **Zone (Custom Box)** cleaning modes.
+- **Per-Room Selection & Ordering:** Select specific rooms on the map or in list view, with configurable execution sequence.
+- **No-Go & No-Mop Overlays:** Visual rendering and interactive management of restricted zones and virtual walls directly on the dashboard.
+- **Dock & Station Popup:** Live telemetry for dock status, consumables, dustbin emptying, and base station operations.
+- **Dynamic Layout:** Responsive column layout on mobile screens and wide landscape view on tablets and wall-mounted dashboards.
+- **Native Theming:** Automatically inherits your active Home Assistant theme (light, dark, and custom themes).
+- **Bilingual Internationalization (i18n):** Full support for **English (en)** and **Turkish (Türkçe - tr)** with automatic language detection.
 
-<div style="display: flex; gap: 10px;">
-    <img src="https://github.com/noambergauz/dreame-vacuum-map-card/raw/master/screenshots/light.png" alt="Main Screen Light" style="width: 33%;">
-    <img src="https://github.com/noambergauz/dreame-vacuum-map-card/raw/master/screenshots/dark.png" alt="Main Screen Dark" style="width: 33%;">
-</div>
+---
 
-<div style="display: flex; gap: 10px;">
-    <img src="https://github.com/noambergauz/dreame-vacuum-map-card/raw/master/screenshots/landscape-light.png" alt="Landscape Light" style="width: 33%;">
-    <img src="https://github.com/noambergauz/dreame-vacuum-map-card/raw/master/screenshots/landscape-dark.png" alt="Landscape Dark" style="width: 33%;">
-</div>
+## Installation & Distribution
 
-## Installation
+This frontend card is bundled directly with the [Botslab Vacuum Home Assistant Integration](https://github.com/srg-n/ha-botslab-vacuum).
 
-### Via [HACS](https://hacs.xyz/)
-
-<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=noambergauz&repository=dreame-vacuum-map-card&category=plugin" target="_blank"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
-
-### Manual:
-
-#### 1. Download the card
-
-Download `dreame-vacuum-map-card.js` from the releases page
-
-#### 2. Add to Home Assistant
-
-Copy the file to your Home Assistant config directory:
-
+### Automatic Registration
+When the integration is loaded, the compiled card bundle is automatically registered and served via Home Assistant's static path:
 ```
-/config/www/dreame-vacuum-map-card/dreame-vacuum-map-card.js
+/botslab_vacuum/botslab-vacuum-map-card.js
 ```
 
-#### 3. Add resource to Lovelace
+No manual resource registration is required when using HACS or manual integration installation.
 
-Go to Settings → Dashboards → Resources → Add Resource:
+---
 
-- URL: `/local/dreame-vacuum-map-card/dreame-vacuum-map-card.js`
-- Resource type: JavaScript Module
+## Dashboard Configuration
 
-## Usage
-
-### 4. Add card to dashboard
-
-```yaml
-type: custom:dreame-vacuum-map-card
-entity: vacuum.dreame_vacuum_entity
-title: Dreame Vacuum
-map_entity: camera.dreame_vacuum_entity # Optional. Defaults to the live map camera registered for this vacuum
-language: auto # Optional. 'auto' (default) follows the Home Assistant language
-default_mode: all # Optional, 'all' (default), 'room', or 'zone'
-default_room_view: map # Optional, 'map' (default) or 'list'
-map_overlays: # Experimental Optional, list of overlays to show on the map
-  - room_labels # Show room names
-  - vacuum # Show vacuum position marker
-  - charger # Show charger position marker
-map_height: 520px # Optional, cap the map height (any CSS length, or a number of pixels). The map is scaled to fit, never cropped.
-room_label_scale: 0.6 # Optional, 1 = default label size. Useful when the labels cover the rooms.
-room_names: # Optional, override the room names shown by the card
-  1: Bedroom # Key: segment id from the map camera's `rooms` attribute …
-  Kitchen: Kitchenette # … or the name the device reports
-buttons: # Optional
-  - type: stop # Only stop button is supported
-    action: stop # 'stop' (default), 'stop_and_dock'
-```
-
-### Renaming rooms
-
-Dreame devices only report room names from a fixed catalogue, and that catalogue is
-English-only regardless of the `language` setting. `room_names` overrides the display
-name everywhere the card shows it — map labels, room list, selection summary, per-room
-settings and toasts. Keys are looked up as segment id first, then as the device-provided
-name; anything not listed keeps its original name. Cleaning commands always use the
-segment id, so renaming is purely cosmetic.
-
-### Landscape layout
-
-There is no option to set. When the card is at least 48rem (768px) wide, the controls move into a side column and the map fills the rest. The column is on the left for left-to-right languages and on the right for right-to-left languages such as Hebrew.
-
-To get a wide card, use a panel view. In a sections view, give the section a `column_span` wide enough for 768px and set the card to span the full section:
-
-```yaml
-grid_options:
-  columns: full
-```
-
-In landscape, the card fits within the screen height. `map_height` can make the map smaller, but not taller than the screen.
-
-## Theming
-
-The card has no palette of its own. It uses the active Home Assistant theme, including its light and dark modes, so it matches the rest of your dashboard and any theme you install.
-
-To change the card's colors, change your Home Assistant theme. The card reads the standard theme variables, mainly:
-
-- `primary-color` for buttons, selections, and the zone overlays
-- `card-background-color` or `ha-card-background`, and `secondary-background-color`, for backgrounds
-- `primary-text-color`, `secondary-text-color`, and `disabled-text-color` for text
-- `divider-color`, `success-color`, `warning-color`, and `error-color`
-- `ha-card-border-radius`, `ha-card-border-color`, `ha-card-border-width`, and `ha-card-box-shadow` for the card frame
-
-The `theme` and `custom_theme` options were removed. Old dashboards that still set them keep working, and the options are ignored.
-
-## Per-Room Customized Cleaning
-
-The card supports per-room customized cleaning settings, allowing you to configure different suction levels, wetness, and cleaning cycles for each room.
-
-## Internationalization (i18n)
-
-When `language` is omitted or set to `auto`, the card follows Home Assistant's language. An explicit code forces that pack. Codes the card does not ship fall back to English.
-
-Entity names and the vacuum status come from the Botslab integration's translations. Buttons, map text, and settings titles stay in the card's language packs.
-
-Currently available:
-
-- **English (en)** - Default
-- **Turkish (tr)** - Türkçe
-
-Keys a pack leaves out fall back to the English text.
-
-Set the language in your configuration:
+Add the card to your Lovelace dashboard (UI editor or YAML):
 
 ```yaml
 type: custom:botslab-vacuum-map-card
-entity: vacuum.botslab_vacuum_entity
-language: tr
+entity: vacuum.botslab_s8_vacuum
+title: Botslab Vacuum
+map_entity: camera.botslab_s8_cleaning_map   # Optional: defaults to the vacuum's map camera
+language: auto                              # Optional: 'auto', 'en', or 'tr'
+default_mode: all                           # Optional: 'all', 'room', or 'zone'
+default_room_view: map                      # Optional: 'map' (default) or 'list'
+map_height: 520px                           # Optional: custom CSS height cap
+map_overlays:
+  - room_labels
+  - vacuum
+  - charger
 ```
 
-The card's own text is translated, including:
+### Configuration Options
 
-- Room selection and cleaning modes
-- Action buttons (Clean, Pause, Resume, Stop, Dock)
-- Toast notifications
-- Map overlays and instructions
-- Per-room customize settings
-- Error messages
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `entity` | `string` | **Required** | The entity ID of the vacuum (e.g. `vacuum.oturma_odasi_botslab_s8`). |
+| `title` | `string` | Optional | Card title displayed in the header. |
+| `map_entity` | `string` | Optional | Companion camera entity providing live raster map and calibration telemetry. |
+| `language` | `string` | `auto` | UI language (`auto`, `en`, or `tr`). |
+| `default_mode` | `string` | `all` | Initial cleaning mode tab: `all`, `room`, or `zone`. |
+| `default_room_view` | `string` | `map` | Mode for room selection: `map` (interactive segments) or `list`. |
+| `map_height` | `string` | `auto` | Maximum height of the map element (e.g. `450px`, `60vh`). |
+| `room_names` | `map` | Optional | Custom room name overrides mapping segment IDs or vendor names to display labels. |
 
-### Adding New Languages
+---
 
-To add support for additional languages:
+## Development & Build Setup
 
-1. Create a new translation file in `src/i18n/locales/` (e.g., `de.ts` for German)
-2. Import the `Translation` type and provide the keys you want to translate (the rest fall back to English)
-3. Add the new locale to `src/i18n/locales/index.ts`
-4. Add a matching entry to `BACKEND_LANGUAGE` in `src/i18n/language.ts`
-
-Example structure:
-
-```typescript
-import type { Translation } from './en';
-
-export const de: Translation = {
-  room_selector: {
-    title: 'Räume auswählen',
-    // ... more translations
-  },
-  // ... any other sections you want to translate
-};
-```
-
-## Development
+The card source code is fully reviewable and rebuildable from this directory.
 
 ### Prerequisites
+- **Node.js**: `20.x` or newer (LTS recommended)
+- **npm**: `10.x` or newer
 
-- Node.js 20+
-- npm or yarn
-
-### Setup
-
+### 1. Install Dependencies
 ```bash
+cd card
 npm install
 ```
 
-### Build
-
+### 2. Build the Card
+Compile TypeScript and build the minified production bundle with Vite:
 ```bash
 npm run build
 ```
+The compiled single-file ES module bundle will be generated at:
+```
+card/dist/botslab-vacuum-map-card.js
+```
 
-The built file will be in `dist/dreame-vacuum-map-card.js`
+### 3. Build & Sync with Integration
+To build the bundle and immediately copy it into the Home Assistant integration's web directory (`custom_components/botslab_vacuum/www/`):
+```bash
+npm run build:copy
+```
+
+### 4. Development Server
+Start the local Vite development server with hot module replacement:
+```bash
+npm run dev
+```
+
+### 5. Code Quality & Testing
+- **Linting:**
+  ```bash
+  npm run lint
+  npm run lint:scss
+  ```
+- **Formatting:**
+  ```bash
+  npm run format:check
+  ```
+- **Unit Tests:**
+  ```bash
+  npm run test:run
+  ```
+
+---
 
 ## Tech Stack
 
-- **React 19.2.0**
-- **Lucide React Icons**
-- **TypeScript 5.9.3**
-- **Vite 7.2.4**
-- **SASS**
+- **React 19**
+- **TypeScript 5.9**
+- **Vite 7** (Library mode with single-file ES module bundling)
+- **SASS / SCSS**
+- **Lucide React** (Icons)
+- **Vitest** (Unit test suite)
 
-## Requirements
+---
 
-- Home Assistant with the [Dreame Vacuum](https://github.com/Tasshack/dreame-vacuum) integration installed
-- A supported Dreame robot vacuum
+## Upstream Attribution & License
 
-## Dynamic entity support
-
-The card shows the controls Home Assistant registered for this vacuum. The Dreame integration already creates an entity only when that model supports it, so a missing feature does not leave an empty row. Config entities the card does not lay out itself appear under **More**.
-
-Shortcuts are the exception: they have no companion entity, so the card reads the `shortcuts` capability from the vacuum.
-
-## Credits
-
-- Original inspiration from [xiaomi-vacuum-map-card](https://github.com/PiotrMachowski/lovelace-xiaomi-vacuum-map-card)
-- [Dreame Vacuum](https://github.com/Tasshack/dreame-vacuum) integration by Tasshack
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details
+- Original implementation: [`dreame-vacuum-map-card`](https://github.com/noambergauz/dreame-vacuum-map-card) by **Noam Bergauz**.
+- Licensed under the **MIT License**.
+- Full copyright and permission notice is available in the [`LICENSE`](LICENSE) file and in [`custom_components/botslab_vacuum/www/THIRD_PARTY.md`](../custom_components/botslab_vacuum/www/THIRD_PARTY.md).

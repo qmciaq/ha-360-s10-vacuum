@@ -11,7 +11,6 @@ import styles from './styles.scss?inline';
 attachLoggerToWindow();
 
 const CARD_TAG = 'botslab-vacuum-map-card';
-const ALIAS_CARD_TAG = 'dreame-vacuum-map-card';
 
 interface ConfigFormField {
   name: keyof HassConfig;
@@ -174,9 +173,6 @@ class BotslabVacuumMapCard extends HTMLElement {
 
 if (!customElements.get(CARD_TAG)) {
   customElements.define(CARD_TAG, BotslabVacuumMapCard);
-}
-if (!customElements.get(ALIAS_CARD_TAG)) {
-  customElements.define(ALIAS_CARD_TAG, class extends BotslabVacuumMapCard {});
 }
 
 declare global {

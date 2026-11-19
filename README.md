@@ -3,7 +3,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](#)
 [![Turkish](https://img.shields.io/badge/Language-T%C3%BCrk%C3%A7e-red.svg)](README.tr.md)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.1%2B-blue.svg?logo=home-assistant)](https://www.home-assistant.io)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?logo=home-assistant)](https://hacs.xyz)
+[![HACS](https://img.shields.io/badge/HACS-Default-green.svg?logo=home-assistant)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.14.2%2B-3776AB.svg?logo=python)](https://www.python.org)
 
@@ -87,12 +87,21 @@ Production-ready Home Assistant integration for **Botslab** and **Qihoo 360** ro
 
 ## 🚀 Installation
 
-### Preferred: Home Assistant Marketplace / HACS (RECOMMENDED) ⭐
+### Option 1: Official HACS Default Repository (RECOMMENDED) ⭐
 
-No manual zip downloading or file copying needed. This integration is 100% compliant with both the official **Home Assistant Marketplace** (HA 2026+) and legacy **HACS**:
+The integration is officially included in the **HACS default repository** list! You can search and install it directly without manually adding custom URLs:
 
-> [!NOTE]
-> **Marketplace Ready:** This integration does not rely on internal HACS storage or dispatch signals (`hass.data["hacs"]`), adheres strictly to Home Assistant Core's integration manifest standards, and supports native Marketplace updates and repairs under **Settings ➔ System ➔ Repairs**.
+1. Open **HACS** in your Home Assistant sidebar ➔ navigate to **Integrations**.
+2. Click the **Explore & Download Repositories** button (or the search icon).
+3. Search for **Botslab Vacuum Robot**.
+4. Click on the card and select **Download**.
+5. Restart Home Assistant (**Settings ➔ System ➔ Restart**).
+
+---
+
+### Option 2: Custom Repository (Alternative / Direct from Git)
+
+If you wish to track bleeding-edge git commits directly, or if your local HACS catalogue has not refreshed yet:
 
 #### Via Home Assistant Marketplace (HA 2026+):
 1. Open **Marketplace** in your Home Assistant sidebar (or go to **Settings ➔ System ➔ Marketplace**).
@@ -105,10 +114,10 @@ No manual zip downloading or file copying needed. This integration is 100% compl
 5. Search for **Botslab Vacuum Robot** and click **Install**.
 6. Restart Home Assistant (**Settings ➔ System ➔ Restart**).
 
-#### Via HACS (Legacy):
+#### Via HACS Custom Repository:
 1. Open **HACS** in your Home Assistant sidebar ➔ navigate to **Integrations**.
 2. Click the **three dots** (`⋮`) in the top right corner and choose **Custom repositories**.
-3. In the Repository field, enter `https://github.com/srg-n/ha-botslab-vacuum`, select **Integration** and click **Add**.
+3. In the Repository field, enter `https://github.com/srg-n/ha-botslab-vacuum`, select **Integration** as the Category, and click **Add**.
 4. Find **Botslab Vacuum Robot** in the list and click **Download**.
 5. Restart Home Assistant (**Settings ➔ System ➔ Restart**).
 

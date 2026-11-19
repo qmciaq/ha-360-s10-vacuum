@@ -3,7 +3,7 @@
 [![English](https://img.shields.io/badge/Language-English-blue.svg)](README.md)
 [![Turkish](https://img.shields.io/badge/Language-T%C3%BCrk%C3%A7e-red.svg)](#)
 [![Home Assistant](https://img.shields.io/badge/Home%20Assistant-2026.1%2B-blue.svg?logo=home-assistant)](https://www.home-assistant.io)
-[![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg?logo=home-assistant)](https://hacs.xyz)
+[![HACS](https://img.shields.io/badge/HACS-Varsay%C4%B1lan-blue.svg?logo=home-assistant)](https://hacs.xyz)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.14.2%2B-3776AB.svg?logo=python)](https://www.python.org)
 
@@ -87,12 +87,21 @@
 
 ## 🚀 Kurulum
 
-### Tercih Edilen: Home Assistant Marketplace / HACS ile Kurulum (ÖNERİLEN) ⭐
+### Seçenek 1: Resmî HACS Varsayılan Deposu (ÖNERİLEN) ⭐
 
-Dosya indirme veya kopyalama işlemleriyle uğraşmadan, doğrudan HACS veya Home Assistant Marketplace üzerinden kurabilirsiniz:
+Entegrasyon resmî **HACS varsayılan entegrasyon listesine (Default Repository)** dahil edilmiştir! Artık özel depo URL'si eklemenize gerek kalmadan doğrudan HACS arama çubuğundan bulabilirsiniz:
 
-> [!NOTE]
-> **Marketplace Uyumlu:** Bu entegrasyon HACS dahili sinyallerine veya özel depolama alanına bağımlı değildir; resmî Home Assistant Core manifest kurallarına tam uyumludur. **Ayarlar ➔ Sistem ➔ Onarımlar** menüsünde tam Marketplace desteği sunar.
+1. Home Assistant sol menüsünden **HACS** ➔ **Entegrasyonlar** (Integrations) bölümüne girin.
+2. Sağ alttaki **Depoları Keşfet ve İndir** (veya büyüteç/arama) butonuna tıklayın.
+3. Arama kutusuna **Botslab Vacuum Robot** yazın.
+4. Listede çıkan entegrasyona tıklayıp sağ alttaki **İndir** (Download) butonuna basın.
+5. **Home Assistant'ı yeniden başlatın** (**Ayarlar ➔ Sistem ➔ Yeniden Başlat**).
+
+---
+
+### Seçenek 2: Özel Depo Ekleme (Custom Repository - Alternatif)
+
+HACS kataloğunuz henüz senkronize olmamışsa veya en güncel git değişikliklerini doğrudan repodan çekmek isterseniz özel depo olarak da ekleyebilirsiniz:
 
 #### Home Assistant Marketplace ile (HA 2026+):
 1. Home Assistant sol menüsünden **Marketplace** (veya **Ayarlar ➔ Sistem ➔ Marketplace**) bölümüne girin.
@@ -102,10 +111,10 @@ Dosya indirme veya kopyalama işlemleriyle uğraşmadan, doğrudan HACS veya Hom
    https://github.com/srg-n/ha-botslab-vacuum
    ```
 4. Kategori olarak **Entegrasyon** (Integration) seçin ve **Ekle** (Add) butonuna basın.
-5. Listede beliren **Botslab Vacuum Robot** kutusuna tıklayıp sağ alt köşedeki **İndir / Yükle** (Install) butonuna basın.
-6. **Home Assistant'ı yeniden başlatın** (**Ayarlar ➔ Sistem ➔ Yeniden Başlat**).
+5. Listede beliren **Botslab Vacuum Robot** kutusuna tıklayıp **İndir / Yükle** (Install) butonuna basın.
+6. Home Assistant'ı yeniden başlatın.
 
-#### HACS ile (Legacy):
+#### HACS Özel Depo ile (Legacy):
 1. Home Assistant sol menüsünden **HACS** ➔ **Entegrasyonlar** (Integrations) bölümüne girin.
 2. Sağ üst köşedeki **üç noktaya** (`⋮`) tıklayın ve **Özel depolar** (Custom repositories) seçeneğini seçin.
 3. Depo alanına `https://github.com/srg-n/ha-botslab-vacuum` yapıştırıp kategori olarak **Integration** seçin ve **Add** deyin.

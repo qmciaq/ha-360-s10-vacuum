@@ -247,7 +247,7 @@ class BotslabRoutinesCard extends HTMLElement {
     const t = this._t();
     const headerTitle = this._config.title || t.header;
     this.innerHTML = `
-      <ha-card header="${headerTitle}">
+      <ha-card>
         <style>
           .wrap{padding:8px 16px 16px}
           .row{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--divider-color)}
@@ -278,11 +278,17 @@ class BotslabRoutinesCard extends HTMLElement {
         <div class="wrap">
           <div id="list"></div>
           <div id="editor"></div>
-          <mwc-button id="addbtn" class="addbtn" outlined>${t.addBtn}</mwc-button>
+          <mwc-button id="addbtn" class="addbtn" outlined></mwc-button>
         </div>
       </ha-card>
     `;
-    this.querySelector("#addbtn").addEventListener("click", () => this._openEditor(-1));
+    const card = this.querySelector("ha-card");
+    if (card) card.setAttribute("header", headerTitle);
+    const addBtn = this.querySelector("#addbtn");
+    if (addBtn) {
+      addBtn.textContent = t.addBtn;
+      addBtn.addEventListener("click", () => this._openEditor(-1));
+    }
     this._renderList();
   }
 
@@ -292,61 +298,77 @@ class BotslabRoutinesCard extends HTMLElement {
     const addBtn = this.querySelector("#addbtn");
 
     if (!this._config.entity) {
-      if (list) list.innerHTML = `<div class="muted" style="padding:16px 0;text-align:center">${t.noEntity}</div>`;
+      if (list) {
+        list.innerHTML = "";
+        const muted = document.createElement("div");
+        muted.className = "muted";
+        muted.style.cssText = "padding:16px 0;text-align:center";
+        muted.textContent = t.noEntity;
+        list.appendChild(muted);
+      }
       if (addBtn) addBtn.style.display = "none";
       return;
     }
     if (addBtn && !this._editing) addBtn.style.display = "";
 
     const { schedules, rooms } = this._data();
+    if (!list) return;
+    list.innerHTML = "";
+
     if (!schedules.length) {
-      list.innerHTML = `<div class="muted" style="padding:8px 0">${t.empty}</div>`;
+      const muted = document.createElement("div");
+      muted.className = "muted";
+      muted.style.padding = "8px 0";
+      muted.textContent = t.empty;
+      list.appendChild(muted);
       return;
     }
-    list.innerHTML = schedules
-      .map((s) => {
-        const dayNames = (s.days || []).map((d) => t.dayLabels[d]).join(" ");
-        const rList = s.room_ids || [];
-        let target;
-        if (rList && rList.length) {
-          target = rList.map((r) => rooms[r] || `#${r}`).join(" → ");
-        } else {
-          target = t.wholeHouse;
-        }
-        const suc = t.suctions[s.suction] || s.suction;
-        const passText = s.passes === 2 ? t.passes2 : t.passes1;
-        const isDelArmed = this._armDeleteSlot === s.slot;
 
-        return `
-        <div class="row" data-slot="${s.slot}">
-          <div class="time">${s.time}</div>
-          <div class="mid">
-            <div class="days">${dayNames || "—"}</div>
-            <div class="sub">${target} • ${suc} • ${passText}</div>
-          </div>
-          <div class="btns">
-            <ha-switch ${s.active ? "checked" : ""}></ha-switch>
-            <ha-icon-button class="run-btn" title="${t.runNowTitle}">
-              <ha-icon icon="mdi:play"></ha-icon>
-            </ha-icon-button>
-            <ha-icon-button class="edit-btn" title="${t.editTitle}">
-              <ha-icon icon="mdi:pencil"></ha-icon>
-            </ha-icon-button>
-            <ha-icon-button class="del-btn ${isDelArmed ? "del-armed" : ""}" title="${isDelArmed ? t.deleteConfirm : t.deleteTitle}">
-              <ha-icon icon="${isDelArmed ? "mdi:alert" : "mdi:delete"}"></ha-icon>
-            </ha-icon-button>
-          </div>
-        </div>
-      `;
-      })
-      .join("");
+    schedules.forEach((s) => {
+      const slot = s.slot;
+      const dayNames = (s.days || []).map((d) => t.dayLabels[d]).join(" ");
+      const rList = s.room_ids || [];
+      let target;
+      if (rList && rList.length) {
+        target = rList.map((r) => rooms[r] || `#${r}`).join(" → ");
+      } else {
+        target = t.wholeHouse;
+      }
+      const suc = t.suctions[s.suction] || s.suction;
+      const passText = s.passes === 2 ? t.passes2 : t.passes1;
+      const isDelArmed = this._armDeleteSlot === slot;
 
-    list.querySelectorAll(".row").forEach((el) => {
-      const slot = Number(el.dataset.slot);
-      const sw = el.querySelector("ha-switch");
+      const row = document.createElement("div");
+      row.className = "row";
+      row.dataset.slot = String(slot);
+
+      const timeEl = document.createElement("div");
+      timeEl.className = "time";
+      timeEl.textContent = s.time || "";
+      row.appendChild(timeEl);
+
+      const midEl = document.createElement("div");
+      midEl.className = "mid";
+
+      const daysEl = document.createElement("div");
+      daysEl.className = "days";
+      daysEl.textContent = dayNames || "—";
+      midEl.appendChild(daysEl);
+
+      const subEl = document.createElement("div");
+      subEl.className = "sub";
+      subEl.textContent = `${target} • ${suc} • ${passText}`;
+      midEl.appendChild(subEl);
+      row.appendChild(midEl);
+
+      const btns = document.createElement("div");
+      btns.className = "btns";
+
+      const sw = document.createElement("ha-switch");
+      if (s.active) sw.setAttribute("checked", "");
       sw.addEventListener("change", (ev) => {
         const checked = ev.target.checked;
-        const cur = schedules.find((s) => s.slot === slot);
+        const cur = schedules.find((item) => item.slot === slot);
         if (!cur) return;
         const curRooms = (cur.room_ids || []).map(String);
         this._call("set_schedule", {
@@ -363,18 +385,38 @@ class BotslabRoutinesCard extends HTMLElement {
           this._notify("Error: " + (err.message || err));
         });
       });
+      btns.appendChild(sw);
 
-      el.querySelector(".run-btn").addEventListener("click", () => {
+      const runBtn = document.createElement("ha-icon-button");
+      runBtn.className = "run-btn";
+      runBtn.setAttribute("title", t.runNowTitle);
+      const runIcon = document.createElement("ha-icon");
+      runIcon.setAttribute("icon", "mdi:play");
+      runBtn.appendChild(runIcon);
+      runBtn.addEventListener("click", () => {
         this._notify(t.routineStarted);
         this._call("run_schedule", { slot: slot }).catch((err) => {
           console.error(err);
           this._notify("Error: " + (err.message || err));
         });
       });
+      btns.appendChild(runBtn);
 
-      el.querySelector(".edit-btn").addEventListener("click", () => this._openEditor(slot));
+      const editBtn = document.createElement("ha-icon-button");
+      editBtn.className = "edit-btn";
+      editBtn.setAttribute("title", t.editTitle);
+      const editIcon = document.createElement("ha-icon");
+      editIcon.setAttribute("icon", "mdi:pencil");
+      editBtn.appendChild(editIcon);
+      editBtn.addEventListener("click", () => this._openEditor(slot));
+      btns.appendChild(editBtn);
 
-      const delBtn = el.querySelector(".del-btn");
+      const delBtn = document.createElement("ha-icon-button");
+      delBtn.className = `del-btn ${isDelArmed ? "del-armed" : ""}`;
+      delBtn.setAttribute("title", isDelArmed ? t.deleteConfirm : t.deleteTitle);
+      const delIcon = document.createElement("ha-icon");
+      delIcon.setAttribute("icon", isDelArmed ? "mdi:alert" : "mdi:delete");
+      delBtn.appendChild(delIcon);
       delBtn.addEventListener("click", () => {
         if (this._armDeleteSlot === slot) {
           clearTimeout(this._armDeleteTimer);
@@ -400,6 +442,10 @@ class BotslabRoutinesCard extends HTMLElement {
           }, 4000);
         }
       });
+      btns.appendChild(delBtn);
+
+      row.appendChild(btns);
+      list.appendChild(row);
     });
   }
 
@@ -447,113 +493,180 @@ class BotslabRoutinesCard extends HTMLElement {
     const e = this._editing;
     const { rooms } = this._data();
     const ed = this.querySelector("#editor");
+    if (!ed) return;
+    ed.innerHTML = "";
 
-    const daysHtml = t.dayLabels
-      .map(
-        (lbl, idx) => `
-      <div class="daychip ${e.days.has(idx) ? "on" : ""}" data-day="${idx}">${lbl}</div>
-    `
-      )
-      .join("");
+    const editorDiv = document.createElement("div");
+    editorDiv.className = "editor";
 
-    const roomEntries = Object.entries(rooms);
-    const roomsHtml = roomEntries.length
-      ? roomEntries
-          .map(([id, name]) => {
-            const ordIdx = e.rooms.findIndex((r) => String(r) === String(id));
-            const on = ordIdx >= 0;
-            return `
-        <div class="roomchip ${on ? "on" : ""}" data-rid="${id}">
-          ${on ? `<span class="ord">${ordIdx + 1}</span>` : ""}
-          <span>${name}</span>
-        </div>
-      `;
-          })
-          .join("")
-      : `<div class="muted">${t.mapNotLoaded}</div>`;
+    // 1. Time field
+    const timeField = document.createElement("div");
+    timeField.className = "field";
+    const timeLabel = document.createElement("label");
+    timeLabel.textContent = t.time;
+    timeField.appendChild(timeLabel);
+    const timeInput = document.createElement("input");
+    timeInput.type = "time";
+    timeInput.id = "ed-time";
+    timeInput.value = e.time || "";
+    timeInput.addEventListener("change", (ev) => {
+      e.time = ev.target.value;
+    });
+    timeField.appendChild(timeInput);
+    editorDiv.appendChild(timeField);
 
-    const sucOpts = SUCTIONS.map(
-      (k) => `
-      <option value="${k}" ${e.suction === k ? "selected" : ""}>${t.suctions[k] || k}</option>
-    `
-    ).join("");
-
-    ed.innerHTML = `
-      <div class="editor">
-        <div class="field">
-          <label>${t.time}</label>
-          <input type="time" id="ed-time" value="${e.time}">
-        </div>
-        <div class="field">
-          <label>${t.days}</label>
-          <div class="daygrid" id="ed-days">${daysHtml}</div>
-        </div>
-        <div class="field">
-          <label>${t.roomsLabel}</label>
-          <div class="roomgrid" id="ed-rooms">${roomsHtml}</div>
-        </div>
-        <div class="field">
-          <label>${t.suction}</label>
-          <select id="ed-suction">${sucOpts}</select>
-        </div>
-        <div class="field">
-          <label>${t.passes}</label>
-          <select id="ed-passes">
-            <option value="1" ${e.passes === 1 ? "selected" : ""}>1</option>
-            <option value="2" ${e.passes === 2 ? "selected" : ""}>2</option>
-          </select>
-        </div>
-        <div class="field" style="display:flex;align-items:center;gap:10px">
-          <label style="margin:0">${t.active}</label>
-          <ha-switch id="ed-active" ${e.active ? "checked" : ""}></ha-switch>
-        </div>
-        <div id="ed-error" class="ed-error"></div>
-        <div class="actrow">
-          <mwc-button id="ed-cancel">${t.cancel}</mwc-button>
-          <mwc-button id="ed-save" raised>${e.slot >= 0 ? t.save : t.create}</mwc-button>
-        </div>
-      </div>
-    `;
-
-    ed.querySelector("#ed-days")
-      .querySelectorAll(".daychip")
-      .forEach((ch) => {
-        ch.addEventListener("click", () => {
-          const d = Number(ch.dataset.day);
-          if (e.days.has(d)) e.days.delete(d);
-          else e.days.add(d);
-          this._renderEditor();
-        });
+    // 2. Days field
+    const daysField = document.createElement("div");
+    daysField.className = "field";
+    const daysLabel = document.createElement("label");
+    daysLabel.textContent = t.days;
+    daysField.appendChild(daysLabel);
+    const dayGrid = document.createElement("div");
+    dayGrid.className = "daygrid";
+    dayGrid.id = "ed-days";
+    t.dayLabels.forEach((lbl, idx) => {
+      const dayChip = document.createElement("div");
+      dayChip.className = `daychip ${e.days.has(idx) ? "on" : ""}`;
+      dayChip.dataset.day = String(idx);
+      dayChip.textContent = lbl;
+      dayChip.addEventListener("click", () => {
+        if (e.days.has(idx)) e.days.delete(idx);
+        else e.days.add(idx);
+        this._renderEditor();
       });
+      dayGrid.appendChild(dayChip);
+    });
+    daysField.appendChild(dayGrid);
+    editorDiv.appendChild(daysField);
 
-    ed.querySelector("#ed-rooms")
-      .querySelectorAll(".roomchip")
-      .forEach((ch) => {
-        ch.addEventListener("click", () => {
-          const rid = String(ch.dataset.rid);
+    // 3. Rooms field
+    const roomsField = document.createElement("div");
+    roomsField.className = "field";
+    const roomsLabel = document.createElement("label");
+    roomsLabel.textContent = t.roomsLabel;
+    roomsField.appendChild(roomsLabel);
+    const roomGrid = document.createElement("div");
+    roomGrid.className = "roomgrid";
+    roomGrid.id = "ed-rooms";
+    const roomEntries = Object.entries(rooms);
+    if (roomEntries.length) {
+      roomEntries.forEach(([id, name]) => {
+        const ordIdx = e.rooms.findIndex((r) => String(r) === String(id));
+        const on = ordIdx >= 0;
+        const chip = document.createElement("div");
+        chip.className = `roomchip ${on ? "on" : ""}`;
+        chip.dataset.rid = String(id);
+        if (on) {
+          const ordSpan = document.createElement("span");
+          ordSpan.className = "ord";
+          ordSpan.textContent = String(ordIdx + 1);
+          chip.appendChild(ordSpan);
+        }
+        const nameSpan = document.createElement("span");
+        nameSpan.textContent = String(name);
+        chip.appendChild(nameSpan);
+
+        chip.addEventListener("click", () => {
+          const rid = String(id);
           const idx = e.rooms.findIndex((r) => String(r) === rid);
           if (idx >= 0) e.rooms.splice(idx, 1);
           else e.rooms.push(rid);
           this._renderEditor();
         });
+        roomGrid.appendChild(chip);
       });
+    } else {
+      const muted = document.createElement("div");
+      muted.className = "muted";
+      muted.textContent = t.mapNotLoaded;
+      roomGrid.appendChild(muted);
+    }
+    roomsField.appendChild(roomGrid);
+    editorDiv.appendChild(roomsField);
 
-    ed.querySelector("#ed-time").addEventListener("change", (ev) => {
-      e.time = ev.target.value;
+    // 4. Suction field
+    const sucField = document.createElement("div");
+    sucField.className = "field";
+    const sucLabel = document.createElement("label");
+    sucLabel.textContent = t.suction;
+    sucField.appendChild(sucLabel);
+    const sucSelect = document.createElement("select");
+    sucSelect.id = "ed-suction";
+    SUCTIONS.forEach((k) => {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = t.suctions[k] || k;
+      if (e.suction === k) opt.selected = true;
+      sucSelect.appendChild(opt);
     });
-    ed.querySelector("#ed-suction").addEventListener("change", (ev) => {
+    sucSelect.addEventListener("change", (ev) => {
       e.suction = ev.target.value;
     });
-    ed.querySelector("#ed-passes").addEventListener("change", (ev) => {
+    sucField.appendChild(sucSelect);
+    editorDiv.appendChild(sucField);
+
+    // 5. Passes field
+    const passField = document.createElement("div");
+    passField.className = "field";
+    const passLabel = document.createElement("label");
+    passLabel.textContent = t.passes;
+    passField.appendChild(passLabel);
+    const passSelect = document.createElement("select");
+    passSelect.id = "ed-passes";
+    [1, 2].forEach((val) => {
+      const opt = document.createElement("option");
+      opt.value = String(val);
+      opt.textContent = String(val);
+      if (e.passes === val) opt.selected = true;
+      passSelect.appendChild(opt);
+    });
+    passSelect.addEventListener("change", (ev) => {
       e.passes = Number(ev.target.value);
     });
-    ed.querySelector("#ed-active").addEventListener("change", (ev) => {
+    passField.appendChild(passSelect);
+    editorDiv.appendChild(passField);
+
+    // 6. Active switch
+    const activeField = document.createElement("div");
+    activeField.className = "field";
+    activeField.style.display = "flex";
+    activeField.style.alignItems = "center";
+    activeField.style.gap = "10px";
+    const activeLabel = document.createElement("label");
+    activeLabel.style.margin = "0";
+    activeLabel.textContent = t.active;
+    activeField.appendChild(activeLabel);
+    const activeSwitch = document.createElement("ha-switch");
+    activeSwitch.id = "ed-active";
+    if (e.active) activeSwitch.setAttribute("checked", "");
+    activeSwitch.addEventListener("change", (ev) => {
       e.active = ev.target.checked;
     });
+    activeField.appendChild(activeSwitch);
+    editorDiv.appendChild(activeField);
 
-    ed.querySelector("#ed-cancel").addEventListener("click", () => this._closeEditor());
-    ed.querySelector("#ed-save").addEventListener("click", () => {
-      const errEl = ed.querySelector("#ed-error");
+    // Error div
+    const errDiv = document.createElement("div");
+    errDiv.id = "ed-error";
+    errDiv.className = "ed-error";
+    editorDiv.appendChild(errDiv);
+
+    // Action row (Cancel & Save)
+    const actRow = document.createElement("div");
+    actRow.className = "actrow";
+
+    const cancelBtn = document.createElement("mwc-button");
+    cancelBtn.id = "ed-cancel";
+    cancelBtn.textContent = t.cancel;
+    cancelBtn.addEventListener("click", () => this._closeEditor());
+    actRow.appendChild(cancelBtn);
+
+    const saveBtn = document.createElement("mwc-button");
+    saveBtn.id = "ed-save";
+    saveBtn.setAttribute("raised", "");
+    saveBtn.textContent = e.slot >= 0 ? t.save : t.create;
+    saveBtn.addEventListener("click", () => {
+      const errEl = editorDiv.querySelector("#ed-error");
       if (!e.days.size) {
         if (errEl) {
           errEl.textContent = t.pickOneDay;
@@ -586,6 +699,10 @@ class BotslabRoutinesCard extends HTMLElement {
           this._notify(t.errorSaving + msg);
         });
     });
+    actRow.appendChild(saveBtn);
+    editorDiv.appendChild(actRow);
+
+    ed.appendChild(editorDiv);
     this._lastKey = null;
   }
 }

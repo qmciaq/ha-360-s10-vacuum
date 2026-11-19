@@ -12,6 +12,7 @@ SECRET_VALUES = [
     "qtok",
     "ttok",
     "a" * 32,  # the m2 device identifier
+    "360account_qid_secret",
 ]
 
 IDENTIFIER_KEYS = {"product_key", "device_title", "serial_number", "device_name"}
@@ -24,7 +25,7 @@ async def test_diagnostics_redacts_secrets(hass: HomeAssistant) -> None:
     )
 
     patch_api()
-    entry = await setup_entry(hass, make_config_entry())
+    entry = await setup_entry(hass, make_config_entry(qid="360account_qid_secret"))
 
     dump = await async_get_config_entry_diagnostics(hass, entry)
     serialised = json.dumps(dump, default=str)

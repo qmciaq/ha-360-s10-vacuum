@@ -118,9 +118,10 @@ class BotslabLanRemoteControl:
         sock.settimeout(1.0)
 
         targets: list[str] = []
-        if target_ip and str(target_ip).strip() not in ("0.0.0.0", "", "-", "None"):
-            targets.append(str(target_ip).strip())
-        if broadcast_fallback or not targets:
+        cleaned_ip = str(target_ip).strip() if target_ip else ""
+        if cleaned_ip and cleaned_ip not in ("0.0.0.0", "", "-", "None", "unknown"):
+            targets.append(cleaned_ip)
+        elif broadcast_fallback:
             targets.append("255.255.255.255")
 
         try:

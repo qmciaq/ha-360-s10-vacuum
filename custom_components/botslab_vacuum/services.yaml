@@ -659,9 +659,3 @@ remote_control_drive:
           max: 500
           step: 50
           unit_of_measurement: ms
-    ip:
-      name: Robot IP Address (Optional)
-      description: Direct IP address of the robot on the local network. If omitted, uses auto-discovered IP or LAN broadcast.
-      required: false
-      selector:
-        text:

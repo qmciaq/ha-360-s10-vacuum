@@ -2969,7 +2969,7 @@ def test_lan_remote_control_payload_and_directions():
 
 
 def test_lan_remote_control_send_datagram(socket_enabled):
-    """Verify UDP datagram transmission to target IP and broadcast with SO_BROADCAST.
+    """Verify UDP datagram transmission to target IP (unicast only) and fallback to broadcast.
 
     Accepts socket_enabled fixture to satisfy Home Assistant's test harness socket guard,
     and replaces socket.socket constructor with a MagicMock so no actual datagram is sent.
@@ -2989,15 +2989,22 @@ def test_lan_remote_control_send_datagram(socket_enabled):
     fake_socket_cls.assert_called_once_with(socket.AF_INET, socket.SOCK_DGRAM)
     # SO_BROADCAST was set
     mock_sock.setsockopt.assert_called_with(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-    # sendto called twice: unicast + broadcast
-    assert mock_sock.sendto.call_count == 2
-    calls = [c[0] for c in mock_sock.sendto.call_args_list]
-    dest_ips = {c[1][0] for c in calls}
-    dest_ports = {c[1][1] for c in calls}
-    assert "192.168.1.105" in dest_ips
-    assert "255.255.255.255" in dest_ips
-    assert dest_ports == {21020}
+    # When target_ip is known, unicast only (no broadcast cross-talk)
+    assert mock_sock.sendto.call_count == 1
+    call_args = mock_sock.sendto.call_args[0]
+    assert call_args[1] == ("192.168.1.105", 21020)
     mock_sock.close.assert_called_once()
+
+    # Test broadcast fallback when target_ip is None / unknown
+    mock_sock_bc = MagicMock()
+    fake_socket_cls_bc = MagicMock(return_value=mock_sock_bc)
+    with patch.object(lr_module.socket, "socket", fake_socket_cls_bc):
+        lr_module.BotslabLanRemoteControl.send_datagram(payload, target_ip=None)
+
+    assert mock_sock_bc.sendto.call_count == 1
+    call_args_bc = mock_sock_bc.sendto.call_args[0]
+    assert call_args_bc[1] == ("255.255.255.255", 21020)
+    mock_sock_bc.close.assert_called_once()
 
 
 @pytest.mark.asyncio
@@ -3457,6 +3464,67 @@ def test_camera_and_vacuum_extra_state_attributes_under_limit():
     vac_size = len(json.dumps(vac_attrs))
     assert vac_size < 14000, f"Vacuum attrs too large: {vac_size} bytes (Limit: 16384)"
     assert "available_rooms" in vac_attrs
+
+
+@pytest.mark.asyncio
+async def test_get_live_map_executor_offload():
+    """Verify get_live_map offloads decompression and rendering to hass executor."""
+    from unittest.mock import AsyncMock, MagicMock
+    from custom_components.botslab_vacuum.api_botslab import BotslabModernClient
+
+    mock_hass = MagicMock()
+    mock_hass.async_add_executor_job = AsyncMock(return_value=(b"\x89PNGfakebytes", (0, 10, 0, 10, 1.0)))
+
+    api = BotslabModernClient(MagicMock(), "global", "dummy_m2", "dummy_q", "dummy_t", hass=mock_hass)
+    fake_map_json = {
+        "width": 100,
+        "height": 100,
+        "map": "AQAAfakeb64lz4payload",
+        "cleanId": "clean_123",
+    }
+    api.get_map_json = AsyncMock(return_value=(fake_map_json, {"MapPkgOssInfo": ""}))
+
+    res = await api.get_live_map(sn="SN123", product_key="PK123")
+    assert res == b"\x89PNGfakebytes"
+    mock_hass.async_add_executor_job.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_quc_login_response_does_not_log_tokens():
+    """Verify QUC login logs only errno and never the decrypted payload with q and t tokens."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+    import custom_components.botslab_vacuum.quc_login as quc_mod
+
+    fake_ret = {
+        "errno": 0,
+        "user": {"q": "sensitive_q_token", "t": "sensitive_t_token", "qid": "12345"},
+    }
+
+    mock_resp = AsyncMock()
+    mock_resp.status = 200
+    mock_resp.json = AsyncMock(return_value={"errno": 0, "ret": "dummy_b64"})
+
+    mock_session = MagicMock()
+    mock_session.post.return_value.__aenter__.return_value = mock_resp
+
+    with patch.object(quc_mod, "decrypt_response", return_value=fake_ret):
+        with patch.object(quc_mod._LOGGER, "debug") as mock_debug:
+            res = await quc_mod.async_login(
+                session=mock_session,
+                email="test@example.com",
+                password="test_password",
+                m2="dummy_m2",
+                region="eu1",
+            )
+            assert res["q"] == "sensitive_q_token"
+            assert res["t"] == "sensitive_t_token"
+
+            logged_strings = [str(c) for c in mock_debug.call_args_list]
+            for log_str in logged_strings:
+                assert "sensitive_q_token" not in log_str
+                assert "sensitive_t_token" not in log_str
+            assert any("QUC decrypted response errno" in log_str for log_str in logged_strings)
+
 
 
 

@@ -299,6 +299,49 @@ def _get_lz4_decompressor() -> Any:
     return decompress_lz4_block
 
 
+def _sync_decompress_and_render_map(
+    map_b64: str,
+    width: int,
+    height: int,
+    resolution: float,
+    x_min: float,
+    y_min: float,
+    rooms: list[Any],
+    no_go_zones: list[Any],
+    clean_zones: list[Any],
+    dock_pos: tuple[float, float] | None,
+    robot_pose: list[float] | None,
+    cleaning_path: list[list[int]] | None,
+    carpets: list[Any],
+    scale: int = 4,
+) -> tuple[bytes, tuple[int, int, int, int, int]]:
+    """CPU-bound worker that base64-decodes, LZ4-decompresses, and renders PNG map in executor."""
+    compressed = base64.b64decode(map_b64)
+    decompress_fn = _get_lz4_decompressor()
+    pixels = decompress_fn(compressed, width * height)
+    if len(pixels) != width * height:
+        raise ValueError(
+            f"decompressed size {len(pixels)} != expected {width * height}"
+        )
+    render_fn = _get_map_renderer()
+    return render_fn(
+        width=width,
+        height=height,
+        pixels=pixels,
+        resolution=resolution,
+        x_min=x_min,
+        y_min=y_min,
+        rooms=rooms,
+        no_go_zones=no_go_zones,
+        clean_zones=clean_zones,
+        dock_pos=dock_pos,
+        robot_pose=robot_pose,
+        cleaning_path=cleaning_path,
+        carpets=carpets,
+        scale=scale,
+    )
+
+
 class BotslabModernClient(BotslabBaseApiClient):
     """Modern Botslab IoT Cloud Client."""
 
@@ -898,35 +941,57 @@ class BotslabModernClient(BotslabBaseApiClient):
         try:
             width = map_json["width"]
             height = map_json["height"]
-            compressed = base64.b64decode(map_json["map"])
-            decompress_fn = _get_lz4_decompressor()
-            pixels = decompress_fn(compressed, width * height)
-            if len(pixels) != width * height:
-                raise ValueError(
-                    f"decompressed size {len(pixels)} != expected {width * height}"
-                )
 
             active_clean_zones = (
                 map_info.clean_zones if (map_info and is_active and is_zc) else []
             )
 
-            render_fn = _get_map_renderer()
-            png_bytes, geom = render_fn(
-                width=width,
-                height=height,
-                pixels=pixels,
-                resolution=map_info.resolution if map_info else 0.05,
-                x_min=map_info.x_min if map_info else 0.0,
-                y_min=map_info.y_min if map_info else 0.0,
-                rooms=map_info.rooms if map_info else [],
-                no_go_zones=map_info.no_go_zones if map_info else [],
-                clean_zones=active_clean_zones,
-                dock_pos=map_info.dock_position if map_info else None,
-                robot_pose=robot_pose,
-                cleaning_path=cleaning_path,
-                carpets=map_info.carpets if map_info else [],
-                scale=4,
-            )
+            res_val = map_info.resolution if map_info else 0.05
+            xmin_val = map_info.x_min if map_info else 0.0
+            ymin_val = map_info.y_min if map_info else 0.0
+            rooms_val = map_info.rooms if map_info else []
+            nogo_val = map_info.no_go_zones if map_info else []
+            dock_val = map_info.dock_position if map_info else None
+            carpets_val = map_info.carpets if map_info else []
+
+            if getattr(self, "hass", None) is not None:
+                png_bytes, geom = await self.hass.async_add_executor_job(
+                    _sync_decompress_and_render_map,
+                    map_json["map"],
+                    width,
+                    height,
+                    res_val,
+                    xmin_val,
+                    ymin_val,
+                    rooms_val,
+                    nogo_val,
+                    active_clean_zones,
+                    dock_val,
+                    robot_pose,
+                    cleaning_path,
+                    carpets_val,
+                    4,
+                )
+            else:
+                loop = asyncio.get_running_loop()
+                png_bytes, geom = await loop.run_in_executor(
+                    None,
+                    _sync_decompress_and_render_map,
+                    map_json["map"],
+                    width,
+                    height,
+                    res_val,
+                    xmin_val,
+                    ymin_val,
+                    rooms_val,
+                    nogo_val,
+                    active_clean_zones,
+                    dock_val,
+                    robot_pose,
+                    cleaning_path,
+                    carpets_val,
+                    4,
+                )
             self._cached_map_geom[sn] = geom
             if map_info:
                 map_info.cmin = geom[0]

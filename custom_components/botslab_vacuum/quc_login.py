@@ -206,7 +206,7 @@ async def async_login(
         raise BotslabAuthError("Missing 'ret' payload in QUC response")
 
     ret = decrypt_response(ret_b64, a117)
-    _LOGGER.debug("QUC decrypted response ret: %s", ret)
+    _LOGGER.debug("QUC decrypted response errno: %s", ret.get("errno"))
     try:
         ret_errno = int(ret.get("errno", 0))
     except (ValueError, TypeError):

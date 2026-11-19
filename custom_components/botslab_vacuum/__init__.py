@@ -240,6 +240,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         q=q,
         t=t,
         qid=qid,
+        hass=hass,
     )
 
     coordinator = BotslabVacuumCoordinator(
@@ -854,16 +855,10 @@ def _register_services(hass: HomeAssistant) -> None:
     async def handle_remote_control_drive(call: ServiceCall) -> None:
         direction = call.data[ATTR_DIRECTION]
         speed = int(call.data.get(ATTR_SPEED, 250))
-        target_ip = call.data.get("ip")
         for coordinator, dev in _targets(call):
-            if target_ip:
-                await coordinator.async_remote_control_drive(
-                    dev.device_name, direction, speed, ip=target_ip
-                )
-            else:
-                await coordinator.async_remote_control_drive(
-                    dev.device_name, direction, speed
-                )
+            await coordinator.async_remote_control_drive(
+                dev.device_name, direction, speed
+            )
 
     hass.services.async_register(
         DOMAIN,
@@ -1230,7 +1225,6 @@ def _register_services(hass: HomeAssistant) -> None:
                     cv.string,
                 ),
                 vol.Optional(ATTR_SPEED, default=250): vol.Coerce(int),
-                vol.Optional("ip"): cv.string,
             }
         ),
     )

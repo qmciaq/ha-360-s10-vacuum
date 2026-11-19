@@ -11,10 +11,11 @@ from .const import (
     CONF_M2,
     CONF_PASSWORD,
     CONF_Q,
+    CONF_QID,
     CONF_T,
 )
 
-_REDACT = {CONF_PASSWORD, CONF_Q, CONF_T, CONF_EMAIL, CONF_M2, "push_alias", "sid"}
+_REDACT = {CONF_PASSWORD, CONF_Q, CONF_T, CONF_EMAIL, CONF_M2, CONF_QID, "qid", "push_alias", "sid"}
 
 # Device/account identifiers that must never appear in a shared diagnostics download
 _DEVICE_REDACT = ("product_key", "device_title", "device_name", "serial_number")

@@ -164,6 +164,7 @@ class BotslabBaseApiClient:
         q: str,
         t: str,
         qid: str | None = None,
+        hass: Any = None,
     ) -> None:
         self.session = session
         self.region = region
@@ -174,6 +175,7 @@ class BotslabBaseApiClient:
         self.sid: str | None = None
         self.push_alias: str = ""
         self.push_key: str | None = None
+        self.hass: Any = hass
 
         reg_info = REGIONS.get(region, REGIONS["eu1"])
         self.base_url = f"https://{reg_info['api']}"

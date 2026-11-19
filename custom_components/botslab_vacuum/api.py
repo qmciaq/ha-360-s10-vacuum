@@ -35,11 +35,13 @@ class BotslabVacuumApi(BotslabModernClient):
         q: str,
         t: str,
         qid: str | None = None,
+        hass: Any = None,
     ) -> None:
-        super().__init__(session=session, region=region, m2=m2, q=q, t=t, qid=qid)
+        super().__init__(session=session, region=region, m2=m2, q=q, t=t, qid=qid, hass=hass)
         self._legacy_client = BotslabLegacy360Client(
             session=session, region=region, m2=m2, q=q, t=t, qid=qid, facade=self
         )
+        self._legacy_client.hass = hass
         self._is_legacy_360 = self.is_legacy_360
 
         # Share shared mutable state dictionaries between facade and backends

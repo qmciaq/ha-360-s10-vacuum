@@ -683,7 +683,8 @@ class BotslabModernClient(BotslabBaseApiClient):
             live_map = self._legacy_live_maps.get(sn)
             if live_map and usable(live_map):
                 return live_map, props
-            return None, props
+            record = await self.get_latest_clean_record(sn)
+            return (record if record and usable(record) else None), props
 
         map_url = self._parse_oss_info(props.get("MapPkgOssInfo")).get("Url")
 

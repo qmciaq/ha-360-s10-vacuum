@@ -695,6 +695,10 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             oss_dict = json.loads(raw_oss) if isinstance(raw_oss, str) else (raw_oss or {})
             clean_id = str(oss_dict.get("CleanID", "")).strip()
             raw_map_id = str(oss_dict.get("MapID", "")).strip()
+            if self.api.is_legacy_360:
+                live_map = self.api._legacy_live_maps.get(sn, {})
+                clean_id = str(live_map.get("cleanId") or clean_id)
+                raw_map_id = str(live_map.get("mapId") or raw_map_id)
             map_id = raw_map_id if (raw_map_id and raw_map_id != "0") else clean_id
             last_map_map = getattr(self, "_last_map_id", None)
             if last_map_map is not None:
@@ -1236,7 +1240,12 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
                 or any(k in status_data for k in ("filter", "main_brush", "side_brush", "sensor"))
             ) and not any(k in status_data for k in ("mode", "workMode", "elec", "elecReal", "cleanTime"))
 
-            if is_consumables:
+            if info_type == "20002":
+                # Legacy map frames are independent of telemetry (20001).
+                if all(status_data.get(key) for key in ("map", "width", "height")):
+                    self.api._legacy_live_maps[sn] = dict(status_data)
+                    _LOGGER.debug("Legacy 360 map frame cached for %s", sn)
+            elif is_consumables:
                 if not hasattr(self.api, "_legacy_consumables"):
                     self.api._legacy_consumables = {}
                 self.api._legacy_consumables.setdefault(sn, {}).update(status_data)

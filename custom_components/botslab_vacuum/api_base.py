@@ -197,6 +197,7 @@ class BotslabBaseApiClient:
         # Legacy 360 caches
         self._legacy_cached_status: dict[str, str] = {}
         self._legacy_live_status: dict[str, dict[str, Any]] = {}
+        self._legacy_live_maps: dict[str, dict[str, Any]] = {}
         self._legacy_consumables: dict[str, dict[str, Any]] = {}
         self._legacy_device_cache: dict[str, dict[str, Any]] = {}
 

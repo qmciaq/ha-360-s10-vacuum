@@ -49,7 +49,6 @@ class BotslabVacuumApi(BotslabModernClient):
         self._legacy_client.cached_s3_signs = self.cached_s3_signs
         self._legacy_client._cached_rooms = self._cached_rooms
         self._legacy_client._cached_map_info = self._cached_map_info
-        self._legacy_client._cached_map_geom = self._cached_map_geom
         self._legacy_client._legacy_cached_status = self._legacy_cached_status
         self._legacy_client._legacy_live_status = self._legacy_live_status
         self._legacy_client._legacy_live_maps = self._legacy_live_maps

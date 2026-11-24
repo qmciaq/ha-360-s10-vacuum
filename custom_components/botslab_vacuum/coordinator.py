@@ -703,6 +703,10 @@ class BotslabVacuumCoordinator(DataUpdateCoordinator[dict[str, BotslabVacuumDevi
             last_map_map = getattr(self, "_last_map_id", None)
             if last_map_map is not None:
                 if map_id:
+                    previous_map_id = last_map_map.get(sn)
+                    if self.api.is_legacy_360 and previous_map_id and previous_map_id != map_id:
+                        self.clear_map_cache(sn)
+                        self._cleaning_paths.pop(sn, None)
                     last_map_map[sn] = map_id
                 elif sn in last_map_map:
                     map_id = last_map_map[sn]

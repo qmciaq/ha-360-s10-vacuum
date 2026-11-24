@@ -1,8 +1,10 @@
 """Regression tests for legacy S10 live maps, using synthetic data only."""
 import base64
+from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from PIL import Image
 
 from custom_components.botslab_vacuum.api import BotslabVacuumApi
 from custom_components.botslab_vacuum.coordinator import BotslabVacuumCoordinator
@@ -73,3 +75,25 @@ async def test_render_and_cache_invalidation(api):
     image = await api.get_live_map("test", "S10")
     assert image and image.startswith(b"\x89PNG")
     assert api._cached_upload_id != old_key
+
+
+@pytest.mark.parametrize("invalid_raster", ["broken padding?", "AQ=="])
+async def test_floor_change_renders_rooms_when_legacy_raster_is_invalid(api, invalid_raster):
+    """A new floor's outlines and raster dimensions must replace the old frame together."""
+    api._legacy_live_maps["test"] = map_doc()
+    old_image = await api.get_live_map("test", "S10")
+
+    new_floor = map_doc()
+    new_floor.update(mapId=5, width=8, height=6, map=invalid_raster)
+    new_floor["smartArea"]["value"][0]["name"] = "U2Fsb24="
+    api._legacy_live_maps["test"] = new_floor
+
+    new_image = await api.get_live_map("test", "S10")
+    assert new_image and new_image != old_image
+    info = api.get_cached_map_info("test")
+    assert (info.width, info.height, info.scale) == (8, 6, 4)
+    assert api.get_cached_rooms("test")[0].name == "Salon"
+
+    with Image.open(BytesIO(new_image)) as preview:
+        assert preview.size == (32, 24)
+        assert preview.getbbox() is not None

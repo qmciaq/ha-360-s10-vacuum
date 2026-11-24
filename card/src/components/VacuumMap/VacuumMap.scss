@@ -25,17 +25,14 @@
   // Content wrapper for the zoomable map area
   &__content {
     position: relative;
-    display: inline-block;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     width: 100%;
     height: 100%;
   }
 
-  // `object-fit: contain` letterboxes the picture inside the capped box. The overlay
-  // SVGs (room labels, segments, vacuum/charger markers) use viewBox +
-  // `preserveAspectRatio="xMidYMid meet"` on the same box, which letterboxes the same
-  // way — so they stay pixel-aligned with the map at any cap.
-  // `--map-max-height` comes from the card's `map_height` option and wins over the
-  // viewport-derived fallback.
+  // All overlays share the measured picture frame, including any letterboxing.
   &__image {
     display: block;
     width: 100%;

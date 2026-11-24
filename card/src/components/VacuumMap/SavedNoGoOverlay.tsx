@@ -20,6 +20,7 @@ interface SavedNoGoOverlayProps {
   transform: MapTransform | null;
   imageWidth: number;
   imageHeight: number;
+  editable: boolean;
   onZoneDeleted?: (message: string) => void;
 }
 
@@ -40,6 +41,7 @@ export function SavedNoGoOverlay({
   transform,
   imageWidth,
   imageHeight,
+  editable,
   onZoneDeleted,
 }: SavedNoGoOverlayProps) {
   const hass = useHass();
@@ -145,15 +147,19 @@ export function SavedNoGoOverlay({
                 ['--wall-angle' as string]: `${angle}deg`,
               } as React.CSSProperties}
             >
-              <span className="vacuum-map__saved-zone-badge">{t('map.virtual_wall')}</span>
-              <button
-                type="button"
-                className="vacuum-map__saved-zone-delete"
-                onClick={(e) => handleDeleteZone(zone, index, e)}
-                title={t('map.delete_zone')}
-              >
-                ×
-              </button>
+              {editable && (
+                <>
+                  <span className="vacuum-map__saved-zone-badge">{t('vacuum_map.virtual_wall')}</span>
+                  <button
+                    type="button"
+                    className="vacuum-map__saved-zone-delete"
+                    onClick={(e) => handleDeleteZone(zone, index, e)}
+                    title={t('vacuum_map.delete_zone')}
+                  >
+                    ×
+                  </button>
+                </>
+              )}
             </div>
           );
         }
@@ -169,7 +175,7 @@ export function SavedNoGoOverlay({
         const heightPct = ((bottomPx - topPx) / imageHeight) * 100;
 
         const isMop = kind === 'nomop';
-        const label = isMop ? t('map.no_mop') : t('map.no_go');
+        const label = isMop ? t('vacuum_map.no_mop') : t('vacuum_map.no_go');
 
         return (
           <div
@@ -182,15 +188,19 @@ export function SavedNoGoOverlay({
               height: `${Math.max(heightPct, 2)}%`,
             }}
           >
-            <span className="vacuum-map__saved-zone-badge">{label}</span>
-            <button
-              type="button"
-              className="vacuum-map__saved-zone-delete"
-              onClick={(e) => handleDeleteZone(zone, index, e)}
-              title={t('map.delete_zone')}
-            >
-              ×
-            </button>
+            {editable && (
+              <>
+                <span className="vacuum-map__saved-zone-badge">{label}</span>
+                <button
+                  type="button"
+                  className="vacuum-map__saved-zone-delete"
+                  onClick={(e) => handleDeleteZone(zone, index, e)}
+                  title={t('vacuum_map.delete_zone')}
+                >
+                  ×
+                </button>
+              </>
+            )}
           </div>
         );
       })}

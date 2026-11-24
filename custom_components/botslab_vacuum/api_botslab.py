@@ -314,15 +314,28 @@ def _sync_decompress_and_render_map(
     cleaning_path: list[list[int]] | None,
     carpets: list[Any],
     scale: int = 4,
+    allow_outline_fallback: bool = False,
 ) -> tuple[bytes, tuple[int, int, int, int, int]]:
-    """CPU-bound worker that base64-decodes, LZ4-decompresses, and renders PNG map in executor."""
-    compressed = base64.b64decode(map_b64)
-    decompress_fn = _get_lz4_decompressor()
-    pixels = decompress_fn(compressed, width * height)
-    if len(pixels) != width * height:
-        raise ValueError(
-            f"decompressed size {len(pixels)} != expected {width * height}"
-        )
+    """Decode and render a map, using same-frame room outlines if supported."""
+    pixel_count = width * height
+    try:
+        compressed = base64.b64decode(map_b64)
+        pixels = _get_lz4_decompressor()(compressed, pixel_count)
+        if len(pixels) != pixel_count:
+            raise ValueError(f"decompressed size {len(pixels)} != expected {pixel_count}")
+    except ValueError as err:
+        if not (
+            allow_outline_fallback
+            and width > 0
+            and height > 0
+            and pixel_count <= 1_000_000
+            and any(len(room.outline or []) >= 3 for room in rooms)
+        ):
+            raise
+        _LOGGER.debug("Rendering room outlines without the map raster: %s", err)
+        # Unknown cells are transparent. The renderer draws the rooms and
+        # their boundaries in the coordinate system of this same frame.
+        pixels = bytes([255]) * pixel_count
     render_fn = _get_map_renderer()
     return render_fn(
         width=width,
@@ -882,11 +895,9 @@ class BotslabModernClient(BotslabBaseApiClient):
         self._cached_is_active = False
         if sn:
             self._cached_map_info.pop(sn, None)
-            self._cached_map_geom.pop(sn, None)
             self._cached_rooms.pop(sn, None)
         else:
             self._cached_map_info.clear()
-            self._cached_map_geom.clear()
             self._cached_rooms.clear()
 
     async def get_live_map(
@@ -904,13 +915,6 @@ class BotslabModernClient(BotslabBaseApiClient):
             return self._cached_map_bytes
 
         map_info = self._build_map_info(map_json)
-        if map_info and map_info.rooms:
-            self._cached_rooms[sn] = map_info.rooms
-        if sn in self._cached_map_geom and map_info:
-            geom = self._cached_map_geom[sn]
-            map_info.cmin, map_info.cmax, map_info.rmin, map_info.rmax, map_info.scale = geom
-        self._cached_map_info[sn] = map_info
-
         oss_info = self._parse_oss_info(props.get("MapPkgOssInfo"))
         upload_id = str(
             oss_info.get("UploadID")
@@ -950,8 +954,8 @@ class BotslabModernClient(BotslabBaseApiClient):
             return self._cached_map_bytes
 
         try:
-            width = map_json["width"]
-            height = map_json["height"]
+            width = int(map_json["width"])
+            height = int(map_json["height"])
 
             active_clean_zones = (
                 map_info.clean_zones if (map_info and is_active and is_zc) else []
@@ -982,6 +986,7 @@ class BotslabModernClient(BotslabBaseApiClient):
                     cleaning_path,
                     carpets_val,
                     4,
+                    self.is_legacy_360,
                 )
             else:
                 loop = asyncio.get_running_loop()
@@ -1002,8 +1007,8 @@ class BotslabModernClient(BotslabBaseApiClient):
                     cleaning_path,
                     carpets_val,
                     4,
+                    self.is_legacy_360,
                 )
-            self._cached_map_geom[sn] = geom
             if map_info:
                 map_info.cmin = geom[0]
                 map_info.cmax = geom[1]
@@ -1011,6 +1016,9 @@ class BotslabModernClient(BotslabBaseApiClient):
                 map_info.rmax = geom[3]
                 map_info.scale = geom[4]
 
+            self._cached_map_info[sn] = map_info
+            if map_info and map_info.rooms:
+                self._cached_rooms[sn] = map_info.rooms
             self._cached_upload_id = upload_id
             self._cached_map_bytes = png_bytes
             self._cached_robot_pose = list(robot_pose) if robot_pose else None

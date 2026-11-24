@@ -679,6 +679,12 @@ class BotslabModernClient(BotslabBaseApiClient):
                 document.get("width") and document.get("height") and document.get("map")
             )
 
+        if self.is_legacy_360:
+            live_map = self._legacy_live_maps.get(sn)
+            if live_map and usable(live_map):
+                return live_map, props
+            return None, props
+
         map_url = self._parse_oss_info(props.get("MapPkgOssInfo")).get("Url")
 
         candidates: list[tuple[dict[str, Any], str, str]] = []
@@ -912,6 +918,10 @@ class BotslabModernClient(BotslabBaseApiClient):
             or map_json.get("clean_id")
             or ""
         )
+
+        if self.is_legacy_360:
+            # Map contents can change within the same cleaning session.
+            upload_id = f"{sn}:{map_json.get('mapId')}:{map_json.get('pathId')}:{hashlib.sha256(str(map_json).encode()).hexdigest()}"
 
         if not cleaning_path:
             for pk in ("posArray", "PosArray", "cleanPath", "clean_path", "track", "path"):

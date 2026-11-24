@@ -114,6 +114,7 @@ export function VacuumMap({
     if (!img) return;
     const observer = new ResizeObserver(() => setPictureFrame(measurePicture(img)));
     observer.observe(img);
+    if (img.parentElement) observer.observe(img.parentElement);
     return () => observer.disconnect();
   }, []);
   const [roomViewMode, setRoomViewMode] = useState<RoomViewMode>(defaultRoomView);
@@ -245,53 +246,53 @@ export function VacuumMap({
                 draggable={false}
               />
 
-              {showChargerMarker && (
-                <ChargerMarker
-                  position={chargerPosition}
-                  transform={transform}
-                  imageWidth={imageDimensions.width}
-                  imageHeight={imageDimensions.height}
-                />
-              )}
-
-              {showVacuumMarker && (
-                <VacuumPositionMarker
-                  position={vacuumPosition}
-                  transform={transform}
-                  imageWidth={imageDimensions.width}
-                  imageHeight={imageDimensions.height}
-                  isCleaning={isCleaning}
-                />
-              )}
-
-              {showRoomLabels && (
-                <RoomLabels
-                  rooms={parsedRooms}
-                  transform={transform}
-                  imageWidth={imageDimensions.width}
-                  imageHeight={imageDimensions.height}
-                  scale={config.room_label_scale}
-                />
-              )}
-
-              {selectedMode === 'room' &&
-                effectiveRoomViewMode === 'map' &&
-                roomSelectionEnabled &&
-                imageDimensions.width > 0 &&
-                imageDimensions.height > 0 &&
-                transform && (
-                  <RoomSegments
-                    rooms={parsedRooms}
-                    selectedRooms={selectedRooms}
-                    onRoomToggle={onRoomToggle}
-                    transform={transform}
-                    imageWidth={imageDimensions.width}
-                    imageHeight={imageDimensions.height}
-                  />
-                )}
-
               {pictureFrame && (
                 <div className="vacuum-map__picture-frame" style={pictureFrame}>
+                  {showChargerMarker && (
+                    <ChargerMarker
+                      position={chargerPosition}
+                      transform={transform}
+                      imageWidth={imageDimensions.width}
+                      imageHeight={imageDimensions.height}
+                    />
+                  )}
+
+                  {showVacuumMarker && (
+                    <VacuumPositionMarker
+                      position={vacuumPosition}
+                      transform={transform}
+                      imageWidth={imageDimensions.width}
+                      imageHeight={imageDimensions.height}
+                      isCleaning={isCleaning}
+                    />
+                  )}
+
+                  {showRoomLabels && (
+                    <RoomLabels
+                      rooms={parsedRooms}
+                      transform={transform}
+                      imageWidth={imageDimensions.width}
+                      imageHeight={imageDimensions.height}
+                      scale={config.room_label_scale}
+                    />
+                  )}
+
+                  {selectedMode === 'room' &&
+                    effectiveRoomViewMode === 'map' &&
+                    roomSelectionEnabled &&
+                    imageDimensions.width > 0 &&
+                    imageDimensions.height > 0 &&
+                    transform && (
+                      <RoomSegments
+                        rooms={parsedRooms}
+                        selectedRooms={selectedRooms}
+                        onRoomToggle={onRoomToggle}
+                        transform={transform}
+                        imageWidth={imageDimensions.width}
+                        imageHeight={imageDimensions.height}
+                      />
+                    )}
+
                   <SavedNoGoOverlay
                     noGoZones={
                       (mapEntity?.attributes?.no_go_zones ||
@@ -301,6 +302,7 @@ export function VacuumMap({
                     transform={transform}
                     imageWidth={imageDimensions.width}
                     imageHeight={imageDimensions.height}
+                    editable={selectedMode === 'zone' && (areaSelectionMode === 'no_go' || areaSelectionMode === 'no_mop')}
                     onZoneDeleted={onZoneDeleted}
                   />
                   {selectedMode === 'zone' && (
